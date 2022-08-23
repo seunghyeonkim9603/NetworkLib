@@ -4,7 +4,7 @@
 #include <WinSock2.h>
 #include <Windows.h>
 #include <process.h>
-#include <unordered_map>
+#include <unordered_set>
 #include <cassert>
 
 #include "EIOType.h"
@@ -12,14 +12,17 @@
 #include "Message.h"
 #include "RingBuffer.h"
 #include "ObjectPool.h"
+#include "Stack.h"
 #include "LanServer.h"
 #include "INetworkEventListener.h"
 #include "PacketDefine.h"
 
+#define MAKE_ID(unique, index) (((unique) << 16) | (index))
+#define EXTRACT_INDEX_FROM_ID(id) ((id) & 0x000000000000FFFF)
+
 LanServer::LanServer()
 	: mListenSocket(INVALID_SOCKET),
 	mhCompletionPort(INVALID_HANDLE_VALUE),
-	mSessionPool(DEFALT_SESSION_POOL_SIZE, false),
 	mIP(0),
 	mPort(0),
 	mMaximumSessionCount(0),
@@ -29,7 +32,7 @@ LanServer::LanServer()
 	WSADATA data;
 	WSAStartup(MAKEWORD(2, 2), &data);
 
-	InitializeSRWLock(&mSessionsLock);
+	InitializeSRWLock(&mIndexesStackLock);
 }
 
 LanServer::~LanServer()
@@ -50,7 +53,8 @@ bool LanServer::TryRun(const unsigned long IP, const unsigned short port
 	mCurrentSessionCount = 0;
 	mMaximumSessionCount = maxSessionCount;
 
-	mSessions.reserve(maxSessionCount * 2 + 1);
+	mSessions = new Session[maxSessionCount];
+	mUseableIndexesStack = new Stack<uint64_t>(maxSessionCount);
 
 	// Initialize Listen Socket
 	{
@@ -108,6 +112,11 @@ bool LanServer::TryRun(const unsigned long IP, const unsigned short port
 		return false;
 	}
 
+	for (uint64_t index = 0; index < maxSessionCount; ++index)
+	{
+		mUseableIndexesStack->TryPush(index);
+	}
+
 	mhThreads.reserve(numWorkerThread + 1);
 	for (unsigned int i = 0; i < numWorkerThread; ++i)
 	{
@@ -124,88 +133,87 @@ void LanServer::Terminate()
 
 	size_t numThreads = mhThreads.size();
 
-	for (auto pair : mSessions)
+	for (unsigned int i = 0; i < mMaximumSessionCount; ++i)
 	{
-		Session* session = pair.second;
-
-		closesocket(session->Socket);
+		if (mSessions[i].ID != INVALID_SESSION_ID)
+		{
+			closesocket(mSessions[i].Socket);
+		}
 	}
-
-	for (int i = 0; i < numThreads - 1; ++i)
+	for (size_t i = 0; i < numThreads - 1; ++i)
 	{
 		PostQueuedCompletionStatus(mhCompletionPort, 0, 0, nullptr);
 	}
-	WaitForMultipleObjects(numThreads, mhThreads.data(), true, INFINITE);
+	WaitForMultipleObjects((DWORD)numThreads, mhThreads.data(), true, INFINITE);
 
-	for (int i = 0; i < numThreads; ++i)
+	for (size_t i = 0; i < numThreads; ++i)
 	{
 		CloseHandle(mhThreads[i]);
 	}
 	CloseHandle(mhCompletionPort);
 
-	mSessions.clear();
+	delete mSessions;
+	delete mUseableIndexesStack;
 }
 
 bool LanServer::TrySendMessage(const sessionID_t ID, const Message& message)
 {
-	Session* session;
+	uint64_t index = EXTRACT_INDEX_FROM_ID(ID);
 
-	AcquireSRWLockExclusive(&mSessionsLock);
+	if (mMaximumSessionCount <= index)
 	{
-		auto iter = mSessions.find(ID);
-		if (iter == mSessions.end())
-		{
-			ReleaseSRWLockExclusive(&mSessionsLock);
-			return false;
-		}
-		session = iter->second;
+		return false;
 	}
-	ReleaseSRWLockExclusive(&mSessionsLock);
+	Session* target = &mSessions[index];
 
 	uint16_t length = message.GetSize();
-	AcquireSRWLockExclusive(&session->Lock);
+	AcquireSRWLockExclusive(&target->Lock);
 	{
-		if (session->ID != ID)
+		if (target->ID != ID)
 		{
-			ReleaseSRWLockExclusive(&session->Lock);
+			ReleaseSRWLockExclusive(&target->Lock);
 			return false;
 		}
-		if (!session->SendBuffer.TryEnqueue((char*)&length, sizeof(length)))
+		if (!target->SendBuffer.TryEnqueue((char*)&length, sizeof(length)))
 		{
-			closesocket(session->Socket);
-			ReleaseSRWLockExclusive(&session->Lock);
+			closesocket(target->Socket);
+			ReleaseSRWLockExclusive(&target->Lock);
 			return false;
 		}
-		if (!session->SendBuffer.TryEnqueue(message.GetBuffer(), message.GetSize()))
+		if (!target->SendBuffer.TryEnqueue(message.GetBuffer(), message.GetSize()))
 		{
-			closesocket(session->Socket);
-			ReleaseSRWLockExclusive(&session->Lock);
+			closesocket(target->Socket);
+			ReleaseSRWLockExclusive(&target->Lock);
 			return false;
 		}
-		sendPost(session);
+		sendPost(target);
 	}
-	ReleaseSRWLockExclusive(&session->Lock);
+	ReleaseSRWLockExclusive(&target->Lock);
 
 	return true;
 }
 
 bool LanServer::TryDisconnect(const sessionID_t ID)
 {
-	Session* erased;
-
-	AcquireSRWLockExclusive(&mSessionsLock);
+	uint64_t index = EXTRACT_INDEX_FROM_ID(ID);
+	
+	if (mMaximumSessionCount <= index)
 	{
-		auto pair = mSessions.find(ID);
-		if (pair == mSessions.end())
+		return false;
+	}
+	Session* target = &mSessions[index];
+
+	AcquireSRWLockExclusive(&target->Lock);
+	{
+		if (target->ID != ID)
 		{
-			ReleaseSRWLockExclusive(&mSessionsLock);
+			ReleaseSRWLockExclusive(&target->Lock);
 			return false;
 		}
-		erased = pair->second;
+		closesocket(target->Socket);
 	}
-	ReleaseSRWLockExclusive(&mSessionsLock);
+	ReleaseSRWLockExclusive(&target->Lock);
 
-	closesocket(erased->Socket);
 	return true;
 }
 
@@ -235,14 +243,15 @@ unsigned int __stdcall LanServer::acceptThread(void* param)
 
 	SOCKET listenSocket = server->mListenSocket;
 	HANDLE hCompletionPort = server->mhCompletionPort;
-	ObjectPool<Session>& sessionPool = server->mSessionPool;
 
-	SRWLOCK sessionsLock = server->mSessionsLock;
-	std::unordered_map<sessionID_t, Session*>& sessions = server->mSessions;
+	SRWLOCK indexesStackLock = server->mIndexesStackLock;
+	Stack<uint64_t>* useableIndexesStack = server->mUseableIndexesStack;
+
+	Session* sessions = server->mSessions;
 
 	INetworkEventListener& listener = *server->mListener;
 
-	sessionID_t nextID = 0;
+	uint64_t uniqueID = 0;
 
 	while (true)
 	{
@@ -257,6 +266,7 @@ unsigned int __stdcall LanServer::acceptThread(void* param)
 		}
 		if (server->mCurrentSessionCount == server->mMaximumSessionCount)
 		{
+			closesocket(clientSocket);
 			continue;
 		}
 		unsigned long IP = ntohl(clientAddr.sin_addr.S_un.S_addr);
@@ -269,21 +279,21 @@ unsigned int __stdcall LanServer::acceptThread(void* param)
 			continue;
 		}
 
-		sessionPool.Lock();
-		Session* session = sessionPool.GetObject();
-		sessionPool.Unlock();
+		uint64_t index;
+		AcquireSRWLockExclusive(&indexesStackLock);
 		{
-			session->ID = nextID;
+			index = useableIndexesStack->Pop();
+		}
+		ReleaseSRWLockExclusive(&indexesStackLock);
+
+		Session* session = &sessions[index];
+		{
+			session->ID = MAKE_ID(uniqueID, index);
 			session->bIsSending = false;
 			session->Socket = clientSocket;
 			session->Addr = clientAddr;
 			session->CurrentAsyncIOCount = 1;
 		}
-
-		AcquireSRWLockExclusive(&sessionsLock);
-		sessions.insert({ session->ID, session });
-		ReleaseSRWLockExclusive(&sessionsLock);
-
 		InterlockedIncrement(&server->mCurrentSessionCount);
 
 		CreateIoCompletionPort((HANDLE)session->Socket, hCompletionPort, (ULONG_PTR)session, 0);
@@ -296,7 +306,7 @@ unsigned int __stdcall LanServer::acceptThread(void* param)
 		{
 			server->releaseSession(session);
 		}
-		++nextID;
+		++uniqueID;
 	}
 	return 0;
 }
@@ -362,6 +372,10 @@ unsigned int __stdcall LanServer::workerThread(void* param)
 					{
 						break;
 					}
+					if (header.Length != 8)
+					{
+						std::cout << "aa" << std::endl;
+					}
 					message.Clear();
 
 					recvBuffer.MoveFront(sizeof(header));
@@ -409,8 +423,10 @@ void LanServer::sendPost(Session* session)
 
 	if (!sendBuffer.IsEmpty() && InterlockedExchange8(reinterpret_cast<char*>(&session->bIsSending), true) == false)
 	{
-		InterlockedIncrement16(&session->CurrentAsyncIOCount);
-
+		if (InterlockedIncrement16(&session->CurrentAsyncIOCount) == 1)
+		{
+			return;
+		}
 		ZeroMemory(&session->SendOverlapped.Overlapped, sizeof(session->SendOverlapped.Overlapped));
 
 		session->SendOverlapped.WSABuf.buf = sendBuffer.GetFront();
@@ -473,25 +489,21 @@ void LanServer::releaseSession(Session* session)
 {
 	sessionID_t id = session->ID;
 
-	AcquireSRWLockExclusive(&mSessionsLock);
-	{
-		mSessions.erase(id);
-	}
-	ReleaseSRWLockExclusive(&mSessionsLock);
-
 	AcquireSRWLockExclusive(&session->Lock);
 	{
-		session->ID = INVALID_SOCKET_ID;
+		session->ID = INVALID_SESSION_ID;
+		closesocket(session->Socket);
 	}
 	ReleaseSRWLockExclusive(&session->Lock);
 
 	session->SendBuffer.Clear();
 	session->ReceiveBuffer.Clear();
-	closesocket(session->Socket);
 
-	mSessionPool.Lock();
-	mSessionPool.ReleaseObject(session);
-	mSessionPool.Unlock();
+	AcquireSRWLockExclusive(&mIndexesStackLock);
+	{
+		mUseableIndexesStack->TryPush(EXTRACT_INDEX_FROM_ID(id));
+	}
+	ReleaseSRWLockExclusive(&mIndexesStackLock);
 
 	InterlockedDecrement(&mCurrentSessionCount);
 

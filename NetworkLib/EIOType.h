@@ -2,6 +2,6 @@
 
 enum class EIOType
 {
-	Recv,
-	Send
+	Recv = 0x10,
+	Send = 0x20
 };

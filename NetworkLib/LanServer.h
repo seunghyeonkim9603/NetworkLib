@@ -68,8 +68,7 @@ private:
 private:
 	enum
 	{
-		DEFALT_SESSION_POOL_SIZE = 8192,
-		INVALID_SOCKET_ID = 0xFFFFFFFFFFFFFFFF
+		INVALID_SESSION_ID = 0xFFFFFFFFFFFFFFFF
 	};
 
 	SOCKET mListenSocket;
@@ -77,17 +76,16 @@ private:
 
 	std::vector<HANDLE> mhThreads;
 
-	ObjectPool<Session> mSessionPool;
+	Session* mSessions;
 
-	SRWLOCK mSessionsLock;
-	std::unordered_map<sessionID_t, Session*> mSessions;
+	Stack<uint64_t>* mUseableIndexesStack;
+	SRWLOCK mIndexesStackLock;
 
 	unsigned long mIP;
 	unsigned short mPort;
 
 	unsigned int mMaximumSessionCount;
 	unsigned int mCurrentSessionCount;
-
 
 	INetworkEventListener* mListener;
 };

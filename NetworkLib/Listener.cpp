@@ -4,13 +4,14 @@
 #include <WinSock2.h>
 #include <Windows.h>
 #include <process.h>
-#include <unordered_map>
+#include <unordered_set>
 
 #include "EIOType.h"
 
 #include "Message.h"
 #include "RingBuffer.h"
 #include "ObjectPool.h"
+#include "Stack.h"
 #include "LanServer.h"
 #include "INetworkEventListener.h"
 #include "PacketDefine.h"
