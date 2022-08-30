@@ -14,9 +14,11 @@
 #include "ObjectPool.h"
 #include "Stack.h"
 #include "LanServer.h"
+#include "IntrusivePointer.h"
 #include "INetworkEventListener.h"
 #include "PacketDefine.h"
 
+#define SEND_WSABUF_COUNT (256)
 #define MAKE_ID(unique, index) (((unique) << 16) | (index))
 #define EXTRACT_INDEX_FROM_ID(id) ((id) & 0x000000000000FFFF)
 
@@ -156,7 +158,7 @@ void LanServer::Terminate()
 	delete mUseableIndexesStack;
 }
 
-bool LanServer::TrySendMessage(const sessionID_t ID, const Message& message)
+bool LanServer::TrySendMessage(const sessionID_t ID, IntrusivePointer<Message>& messagePtr)
 {
 	uint64_t index = EXTRACT_INDEX_FROM_ID(ID);
 
@@ -166,7 +168,6 @@ bool LanServer::TrySendMessage(const sessionID_t ID, const Message& message)
 	}
 	Session* target = &mSessions[index];
 
-	uint16_t length = message.GetSize();
 	AcquireSRWLockExclusive(&target->Lock);
 	{
 		if (target->ID != ID)
@@ -174,13 +175,9 @@ bool LanServer::TrySendMessage(const sessionID_t ID, const Message& message)
 			ReleaseSRWLockExclusive(&target->Lock);
 			return false;
 		}
-		if (!target->SendBuffer.TryEnqueue((char*)&length, sizeof(length)))
-		{
-			closesocket(target->Socket);
-			ReleaseSRWLockExclusive(&target->Lock);
-			return false;
-		}
-		if (!target->SendBuffer.TryEnqueue(message.GetBuffer(), message.GetSize()))
+		messagePtr.AddRefCount();
+
+		if (!target->SendBuffer.TryEnqueue((char*)&messagePtr, sizeof(void*)))
 		{
 			closesocket(target->Socket);
 			ReleaseSRWLockExclusive(&target->Lock);
@@ -244,7 +241,6 @@ unsigned int __stdcall LanServer::acceptThread(void* param)
 	SOCKET listenSocket = server->mListenSocket;
 	HANDLE hCompletionPort = server->mhCompletionPort;
 
-	SRWLOCK indexesStackLock = server->mIndexesStackLock;
 	Stack<uint64_t>* useableIndexesStack = server->mUseableIndexesStack;
 
 	Session* sessions = server->mSessions;
@@ -280,11 +276,11 @@ unsigned int __stdcall LanServer::acceptThread(void* param)
 		}
 
 		uint64_t index;
-		AcquireSRWLockExclusive(&indexesStackLock);
+		AcquireSRWLockExclusive(&server->mIndexesStackLock);
 		{
 			index = useableIndexesStack->Pop();
 		}
-		ReleaseSRWLockExclusive(&indexesStackLock);
+		ReleaseSRWLockExclusive(&server->mIndexesStackLock);
 
 		Session* session = &sessions[index];
 		{
@@ -372,10 +368,6 @@ unsigned int __stdcall LanServer::workerThread(void* param)
 					{
 						break;
 					}
-					if (header.Length != 8)
-					{
-						std::cout << "aa" << std::endl;
-					}
 					message.Clear();
 
 					recvBuffer.MoveFront(sizeof(header));
@@ -418,6 +410,7 @@ unsigned int __stdcall LanServer::workerThread(void* param)
 void LanServer::sendPost(Session* session)
 {
 	int retval;
+	WSABUF buffers[SEND_WSABUF_COUNT];
 
 	RingBuffer& sendBuffer = session->SendBuffer;
 
@@ -429,6 +422,14 @@ void LanServer::sendPost(Session* session)
 		}
 		ZeroMemory(&session->SendOverlapped.Overlapped, sizeof(session->SendOverlapped.Overlapped));
 
+		int numMessage = sendBuffer.GetSize() % sizeof(void*);
+		for (int i = 0; i < numMessage; ++i)
+		{
+			IntrusivePointer<Message>* messagePtr;
+			sendBuffer.TryDequeue((char*)&messagePtr, sizeof(void*));
+
+			buffers[i].buf = (*messagePtr)->CreateMessage((unsigned int*)&buffers[i].len); asdf; asdfasf; lajsdf;l
+		}
 		session->SendOverlapped.WSABuf.buf = sendBuffer.GetFront();
 		session->SendOverlapped.WSABuf.len = sendBuffer.GetDirectDequeueableSize();
 

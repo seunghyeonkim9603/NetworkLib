@@ -9,19 +9,19 @@ Message::Message()
 
 Message::Message(int capacity)
     : mCapacity(capacity),
-    mBuffer(new char[capacity]),
-    mFront(mBuffer),
-    mRear(mBuffer)
+    mBuffer(new char[capacity + sizeof(Header)]),
+    mFront(mBuffer + sizeof(Header)),
+    mRear(mBuffer + sizeof(Header))
 {
 }
 
 Message::Message(const Message& other)
     : mCapacity(other.mCapacity),
-    mBuffer(new char[other.mCapacity]),
+    mBuffer(new char[other.mCapacity + sizeof(Header)]),
     mFront(mBuffer + (other.mFront - other.mBuffer)),
     mRear(mBuffer + (other.mRear - other.mBuffer))
 {
-    memcpy(mBuffer, other.mBuffer, mCapacity);
+    memcpy(mBuffer, other.mBuffer, mCapacity + sizeof(Header));
 }
 
 Message::Message(Message&& other) noexcept

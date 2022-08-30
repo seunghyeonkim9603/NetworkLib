@@ -21,6 +21,7 @@
   <ItemGroup>
     <ClInclude Include="EIOType.h" />
     <ClInclude Include="INetworkEventListener.h" />
+    <ClInclude Include="IntrusivePointer.h" />
     <ClInclude Include="LanServer.h" />
     <ClInclude Include="Listener.h" />
     <ClInclude Include="Message.h" />

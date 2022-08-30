@@ -48,7 +48,7 @@ public:
 			, const unsigned int maxSessionCount, const bool bSupportsNagle
 			, INetworkEventListener* listener);
 	void Terminate();
-	bool TrySendMessage(const sessionID_t ID, const Message& message);
+	bool TrySendMessage(const sessionID_t ID, IntrusivePointer<Message>& messagePtr);
 	bool TryDisconnect(const sessionID_t ID);
 
 	unsigned long GetIP() const;

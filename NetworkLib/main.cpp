@@ -10,6 +10,7 @@
 #include "EIOType.h"
 
 #include "Message.h"
+#include "IntrusivePointer.h"
 #include "RingBuffer.h"
 #include "ObjectPool.h"
 #include "Stack.h"
@@ -24,7 +25,7 @@ int main(void)
 {
 	LanServer server;
 	Listener listener(&server);
-
+	
 	LARGE_INTEGER frep;
 	LARGE_INTEGER before;
 	LARGE_INTEGER cur;

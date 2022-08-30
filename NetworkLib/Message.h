@@ -3,6 +3,13 @@
 class Message final
 {
 public:
+    struct Header
+    {
+        uint16_t Length;
+    };
+    static_assert(sizeof(Header) == 2, "Invalid Message::Header size");
+
+public:
 	Message();
 	Message(int capacity);
 	Message(const Message& other);
@@ -12,12 +19,13 @@ public:
 	inline void	Reserve(int capacity);
 	inline void	Release();
 	inline void	Clear();
-	int		GetCapacity() const;
-	int		GetSize() const;
-	char*	GetBuffer() const;
-    char*   GetRear() const;
-	int		MoveWritePos(int offset);
-	int		MoveReadPos(int offset);
+	inline int		GetCapacity() const;
+    inline int		GetSize() const;
+    inline char*	GetFront() const;
+    inline char*    GetRear() const;
+    inline int		MoveWritePos(int offset);
+    inline int		MoveReadPos(int offset);
+    inline char*    CreateMessage(unsigned int* outLength) const;
 
 	inline Message& operator=(const Message& other);
 	inline Message& operator=(Message&& other) noexcept;
@@ -51,7 +59,7 @@ public:
 	inline Message& operator>>(double& val);
 
 	inline Message& Write(const char* str, int size);
-	inline Message& Read(char* buffer, int size);
+	inline Message& Read(char* outBuffer, int size);
 private:
 	inline int getEnquableSize() const;
 
@@ -84,8 +92,8 @@ inline void Message::Release()
 
 inline void Message::Clear()
 {
-    mFront = mBuffer;
-    mRear = mBuffer;
+    mFront = mBuffer + sizeof(Header);
+    mRear = mBuffer + sizeof(Header);
 }
 
 inline int Message::GetCapacity() const
@@ -103,7 +111,18 @@ inline char* Message::GetRear() const
     return mRear;
 }
 
-inline char* Message::GetBuffer() const
+inline char* Message::CreateMessage(unsigned int* outLength) const
+{
+    Header* header = reinterpret_cast<Header*>(mFront - sizeof(Header));
+    {
+        header->Length = GetSize();
+    }
+    *outLength = header->Length + sizeof(header);
+
+    return reinterpret_cast<char*>(header);
+}
+
+inline char* Message::GetFront() const
 {
     return mFront;
 }
@@ -126,8 +145,8 @@ inline Message& Message::operator=(const Message& other)
     {
         delete mBuffer;
     }
-    mBuffer = new char[other.mCapacity];
-    memcpy(mBuffer, other.mBuffer, other.mCapacity);
+    mBuffer = new char[other.mCapacity + sizeof(Header)];
+    memcpy(mBuffer, other.mBuffer, other.mCapacity + sizeof(Header));
     mCapacity = other.mCapacity;
     mFront = mBuffer + (other.mFront - other.mBuffer);
     mRear = mBuffer + (other.mRear - other.mBuffer);
