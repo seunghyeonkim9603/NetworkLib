@@ -19,6 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="CCrashDump.h" />
     <ClInclude Include="EIOType.h" />
     <ClInclude Include="INetworkEventListener.h" />
     <ClInclude Include="IntrusivePointer.h" />
@@ -26,11 +27,12 @@
     <ClInclude Include="Listener.h" />
     <ClInclude Include="Message.h" />
     <ClInclude Include="ObjectPool.h" />
-    <ClInclude Include="PacketDefine.h" />
+    <ClInclude Include="LockFreeQueue.h" />
     <ClInclude Include="RingBuffer.h" />
-    <ClInclude Include="Stack.h" />
+    <ClInclude Include="LockFreeStack.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="CCrashDump.cpp" />
     <ClCompile Include="LanServer.cpp" />
     <ClCompile Include="Listener.cpp" />
     <ClCompile Include="main.cpp" />

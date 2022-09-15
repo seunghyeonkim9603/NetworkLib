@@ -1,141 +1,129 @@
+#pragma warning( disable : 26495 )
+
 #pragma once
 
-#include <vector>
+
+#define MAKE_TOP(ptr, op_count) (reinterpret_cast<Node*>((LONG_PTR)(ptr) | ((op_count) << 48)))
+#define REMOVE_OP_COUNT_FROM(ptr) (reinterpret_cast<Node*>((LONG_PTR)(ptr) & 0x00007FFFFFFFFFFF))
+#define EXTRACT_OP_COUNT_FROM(ptr) (static_cast<int64_t>((LONG_PTR)(ptr) >> 48))
 
 template<typename T>
 class ObjectPool final
 {
 public:
-	ObjectPool(size_t size, bool bIsPlacementNew);
+	struct Node
+	{
+		T		Obj;
+		Node*	Next;
+	};
+
+public:
+	ObjectPool(unsigned int size);
 	ObjectPool(ObjectPool& other) = delete;
 	ObjectPool(ObjectPool&& other) = delete;
 	~ObjectPool();
 
-	template<typename ...TArgs>
-	T* GetObject(TArgs&&... args);
+	T*		GetObject();
+	void	ReleaseObject(T* obj);
 
-	void ReleaseObject(T* obj);
+	unsigned int GetAllCount() const;
+	unsigned int GetActiveCount() const;
+	unsigned int GetInactiveCount() const;
 
-	size_t GetAllCount() const;
-	size_t GetActiveCount() const;
-	size_t GetInactiveCount() const;
-
-	void Lock();
-	void Unlock();
 private:
-	std::vector<char*> mPool;
-	size_t mAllCount;
-	size_t mActiveCount;
-	bool mbIsPlacementNew;
-
-	SRWLOCK mLock;
+	Node*			mTop;
+	unsigned int	mAllCount;
+	unsigned int	mActiveCount;
 };
 
+
 template<typename T>
-inline ObjectPool<T>::ObjectPool(size_t size, bool bIsPlacementNew)
-	: mAllCount(size),
-	mActiveCount(0),
-	mbIsPlacementNew(bIsPlacementNew)
+inline ObjectPool<T>::ObjectPool(unsigned int size)
+	: mTop(nullptr),
+	mAllCount(size),
+	mActiveCount(0)
 {
-	InitializeSRWLock(&mLock);
-
-	mPool.reserve(size);
-
-	if (bIsPlacementNew)
+	for (size_t i = 0; i < size; ++i)
 	{
-		for (size_t i = 0; i < size; ++i)
+		Node* newNode = new Node();
 		{
-			mPool.push_back(new char[sizeof(T)]);
+			newNode->Next = mTop;
 		}
-	}
-	else
-	{
-		for (size_t i = 0; i < size; ++i)
-		{
-			mPool.push_back(reinterpret_cast<char*>(new T()));
-		}
+		mTop = newNode;
 	}
 }
 
 template<typename T>
 inline ObjectPool<T>::~ObjectPool()
 {
-	if (mbIsPlacementNew)
+	Node* cur = REMOVE_OP_COUNT_FROM(mTop);
+	Node* next;
+	
+	while (cur != nullptr)
 	{
-		for (int i = 0; i < mPool.size(); ++i)
-		{
-			delete mPool[i];
-		}
-	}
-	else
-	{
-		for (int i = 0; i < mPool.size(); ++i)
-		{
-			T* obj = reinterpret_cast<T*>(mPool[i]);
-
-			delete obj;
-		}
+		next = cur->Next;
+		delete cur;
+		cur = next;
 	}
 }
 
 template<typename T>
-template<typename ...TArgs>
-inline T* ObjectPool<T>::GetObject(TArgs&&... args)
+inline T* ObjectPool<T>::GetObject()
 {
-	++mActiveCount;
+	Node* oldTop;
+	Node* newTop;
 
-	if (mPool.empty())
+	while (true)
 	{
-		++mAllCount;
-		return new T(std::forward<TArgs>(args)...);
-	}
-	T* obj = reinterpret_cast<T*>(mPool.back());
-	mPool.pop_back();
+		oldTop = mTop;
+		newTop = MAKE_TOP(REMOVE_OP_COUNT_FROM(oldTop)->Next, EXTRACT_OP_COUNT_FROM(oldTop) + 1);
 
-	if (mbIsPlacementNew)
-	{
-		obj = new (obj) T(std::forward<TArgs>(args)...);
+		if (InterlockedCompareExchangePointer((PVOID*)&mTop, newTop, oldTop) == oldTop)
+		{
+			break;
+		}
 	}
-	return obj;
+	oldTop = REMOVE_OP_COUNT_FROM(oldTop);
+
+	InterlockedIncrement(&mActiveCount);
+
+	return reinterpret_cast<T*>(oldTop);
 }
 
 template<typename T>
 inline void ObjectPool<T>::ReleaseObject(T* obj)
 {
-	if (mbIsPlacementNew)
+	Node* oldTop;
+	Node* newTop = reinterpret_cast<Node*>(obj);
+
+	while (true)
 	{
-		obj->T::~T();
+		oldTop = mTop;
+		newTop->Next = REMOVE_OP_COUNT_FROM(oldTop);
+
+		if (InterlockedCompareExchangePointer((PVOID*)&mTop, MAKE_TOP(newTop, EXTRACT_OP_COUNT_FROM(oldTop) + 1), oldTop) == oldTop)
+		{
+			break;
+		}
 	}
-	mPool.push_back(reinterpret_cast<char*>(obj));
-	--mActiveCount;
+	InterlockedDecrement(&mActiveCount);
 }
 
+
 template<typename T>
-inline size_t ObjectPool<T>::GetAllCount() const
+inline unsigned int ObjectPool<T>::GetAllCount() const
 {
 	return mAllCount;
 }
 
 template<typename T>
-inline size_t ObjectPool<T>::GetActiveCount() const
+inline unsigned int ObjectPool<T>::GetActiveCount() const
 {
 	return mActiveCount;
 }
 
 template<typename T>
-inline size_t ObjectPool<T>::GetInactiveCount() const
+inline unsigned int ObjectPool<T>::GetInactiveCount() const
 {
 	return mAllCount - mActiveCount;
-}
-
-template<typename T>
-inline void ObjectPool<T>::Lock()
-{
-	AcquireSRWLockExclusive(&mLock);
-}
-
-template<typename T>
-inline void ObjectPool<T>::Unlock()
-{
-	ReleaseSRWLockExclusive(&mLock);
 }
