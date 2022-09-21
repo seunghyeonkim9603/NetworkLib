@@ -14,11 +14,10 @@
 #include "ObjectPool.h"
 #include "LockFreeQueue.h"
 #include "LockFreeStack.h"
-#include "LanServer.h"
 #include "IntrusivePointer.h"
+#include "LanServer.h"
 #include "INetworkEventListener.h"
 
-#define SEND_WSABUF_COUNT (256)
 #define MAKE_ID(unique, index) (((unique) << 16) | (index))
 #define EXTRACT_INDEX_FROM_ID(id) ((id) & 0x000000000000FFFF)
 
@@ -55,7 +54,7 @@ bool LanServer::TryRun(const unsigned long IP, const unsigned short port
 
 	mSessions = new Session[maxSessionCount];
 	mUseableIndexesStack = new LockFreeStack<uint64_t>(maxSessionCount);
-
+	mMessagePool = new ObjectPool<IntrusivePointer<Message>>(maxSessionCount * MAX_ASYNC_SENDS);
 	// Initialize Listen Socket
 	{
 		mListenSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -158,51 +157,45 @@ void LanServer::Terminate()
 
 bool LanServer::TrySendMessage(const sessionID_t ID, IntrusivePointer<Message>* messagePtr)
 {
-	uint64_t index = EXTRACT_INDEX_FROM_ID(ID);
+	Session* target = acquireSessionOrNull(ID);
 
-	if (mMaximumSessionCount <= index)
+	if (target == nullptr)
 	{
 		return false;
 	}
-	Session* target = &mSessions[index];
+	IntrusivePointer<Message>* sendMessage = mMessagePool->GetObject();
+	*sendMessage = *messagePtr;
 
-	if (target->ID != ID)
-	{
-		return false;
-	}
-	messagePtr->AddRefCount();
+	sendMessage->AddRefCount();
 
-	if (!target->SendQueue.TryEnqueue(messagePtr))
+	if (!target->SendQueue.TryEnqueue(sendMessage))
 	{
 		closesocket(target->Socket);
 		return false;
 	}
 	sendPost(target);
 
+	if (InterlockedDecrement16(&target->Verifier.CurrentAsyncIOCount) == 0)
+	{
+		releaseSession(target);
+	}
 	return true;
 }
 
 bool LanServer::TryDisconnect(const sessionID_t ID)
 {
-	uint64_t index = EXTRACT_INDEX_FROM_ID(ID);
+	Session* target = acquireSessionOrNull(ID);
 
-	if (mMaximumSessionCount <= index)
+	if (target == nullptr)
 	{
 		return false;
 	}
-	Session* target = &mSessions[index];
+	closesocket(target->Socket);
 
-	AcquireSRWLockExclusive(&target->Lock);
+	if (InterlockedDecrement16(&target->Verifier.CurrentAsyncIOCount) == 0)
 	{
-		if (target->ID != ID)
-		{
-			ReleaseSRWLockExclusive(&target->Lock);
-			return false;
-		}
-		closesocket(target->Socket);
+		releaseSession(target);
 	}
-	ReleaseSRWLockExclusive(&target->Lock);
-
 	return true;
 }
 
@@ -266,7 +259,6 @@ unsigned int __stdcall LanServer::acceptThread(void* param)
 		{
 			continue;
 		}
-
 		uint64_t index;
 
 		index = useableIndexesStack->Pop();
@@ -277,8 +269,9 @@ unsigned int __stdcall LanServer::acceptThread(void* param)
 			session->bIsSending = false;
 			session->Socket = clientSocket;
 			session->Addr = clientAddr;
-			session->NumSend = 0;
-			InterlockedIncrement16(&session->CurrentAsyncIOCount);
+			session->NumSent = 0;
+			session->Verifier.ReleaseFlag = false;
+			InterlockedIncrement16(&session->Verifier.CurrentAsyncIOCount);
 		}
 		InterlockedIncrement(&server->mCurrentSessionCount);
 
@@ -288,7 +281,7 @@ unsigned int __stdcall LanServer::acceptThread(void* param)
 
 		server->recvPost(session);
 
-		if (InterlockedDecrement16(&session->CurrentAsyncIOCount) == 0)
+		if (InterlockedDecrement16(&session->Verifier.CurrentAsyncIOCount) == 0)
 		{
 			server->releaseSession(session);
 		}
@@ -325,12 +318,13 @@ unsigned int __stdcall LanServer::workerThread(void* param)
 
 			if (overlapped == nullptr)
 			{
-				// std::cout << "Failed GQCS and Overlapped is null, ErrorCode : " << errorCode << std::endl;
+				std::cout << "Failed GQCS and Overlapped is null, ErrorCode : " << errorCode << std::endl;
 				break;
 			}
-			else if (errorCode != ERROR_NETNAME_DELETED && errorCode != 0)
+			else if (errorCode != ERROR_NETNAME_DELETED && errorCode != ERROR_IO_PENDING
+					&& errorCode != WSAECONNRESET && errorCode != 0)
 			{
-				// std::cout << "Failed GQCS and Overlapped is not null, ErrorCode : " << errorCode << std::endl;
+				std::cout << "Failed GQCS and Overlapped is not null, ErrorCode : " << errorCode << std::endl;
 			}
 		}
 
@@ -372,14 +366,14 @@ unsigned int __stdcall LanServer::workerThread(void* param)
 			break;
 			case EIOType::Send:
 			{
-				int numSend = session->NumSend;
+				int numSent = session->NumSent;
 
-				for (int i = 0; i < numSend; ++i)
+				for (int i = 0; i < numSent; ++i)
 				{
 					sentMessages[i]->Release();
+					server->mMessagePool->ReleaseObject(sentMessages[i]);
 				}
-				//packet release 해줘야 겠지??
-				session->NumSend = 0;
+				session->NumSent = 0;
 				session->bIsSending = false;
 
 				server->sendPost(session);
@@ -390,7 +384,7 @@ unsigned int __stdcall LanServer::workerThread(void* param)
 				break;
 			}
 		}
-		if (InterlockedDecrement16(&session->CurrentAsyncIOCount) == 0)
+		if (InterlockedDecrement16(&session->Verifier.CurrentAsyncIOCount) == 0)
 		{
 			server->releaseSession(session);
 		}
@@ -405,37 +399,40 @@ void LanServer::sendPost(Session* session)
 	int retval;
 	WSABUF buffers[MAX_ASYNC_SENDS];
 
-	auto& sendQueue = session->SendQueue;
-
-	if (!sendQueue.IsEmpty() && InterlockedExchange8(reinterpret_cast<char*>(&session->bIsSending), true) == false)
+	if (!session->SendQueue.IsEmpty() && InterlockedExchange8(reinterpret_cast<char*>(&session->bIsSending), true) == false) //IsEmpty어디로 옮길까..
 	{
-		InterlockedIncrement16(&session->CurrentAsyncIOCount);
+		InterlockedIncrement16(&session->Verifier.CurrentAsyncIOCount);
 
 		ZeroMemory(&session->SendOverlapped.Overlapped, sizeof(session->SendOverlapped.Overlapped));
 
-		int numMessage = send.GetSize() % sizeof(void*);
-		for (int i = 0; i < numMessage; ++i)
+		IntrusivePointer<Message>* sendMessage;
+		int numSendMessage = 0;
+
+		while (session->SendQueue.TryDequeue(&sendMessage)) // 갯수 체크 해줘야 하나
 		{
-			IntrusivePointer<Message>* messagePtr;
-			sendBuffer.TryDequeue((char*)&messagePtr, sizeof(void*));
+			WSABUF* buff = &buffers[numSendMessage];
+			session->SentMessages[numSendMessage] = sendMessage;
 
-			buffers[i].buf = (*messagePtr)->CreateMessage((unsigned int*)&buffers[i].len); asdf; asdfasf; lajsdf; l
+			buff->buf = (*sendMessage)->CreateMessage((unsigned int*)&buff->len);
+
+			++numSendMessage;
 		}
-		session->SendOverlapped.WSABuf.buf = sendBuffer.GetFront();
-		session->SendOverlapped.WSABuf.len = sendBuffer.GetDirectDequeueableSize();
+		session->NumSent = numSendMessage;
 
-		retval = WSASend(session->Socket, buffers, numMessage, nullptr, 0, &session->SendOverlapped.Overlapped, nullptr);
+		retval = WSASend(session->Socket, buffers, numSendMessage, nullptr, 0, &session->SendOverlapped.Overlapped, nullptr);
 
 		if (retval == SOCKET_ERROR)
 		{
 			int errorCode = WSAGetLastError();
 			if (errorCode != ERROR_IO_PENDING)
 			{
+				session->bIsSending = false;
+
 				if (errorCode != WSAECONNRESET)
 				{
-					// std::cout << "WSASend() Error : " << errorCode << std::endl;
+					std::cout << "WSASend() Error : " << errorCode << std::endl;
 				}
-				if (InterlockedDecrement16(&session->CurrentAsyncIOCount) == 0)
+				if (InterlockedDecrement16(&session->Verifier.CurrentAsyncIOCount) == 0)
 				{
 					releaseSession(session);
 				}
@@ -449,7 +446,7 @@ void LanServer::recvPost(Session* session)
 	int retval;
 	WSABUF buffer;
 
-	InterlockedIncrement16(&session->CurrentAsyncIOCount);
+	InterlockedIncrement16(&session->Verifier.CurrentAsyncIOCount);
 
 	RingBuffer& recvBuffer = session->ReceiveBuffer;
 
@@ -468,9 +465,9 @@ void LanServer::recvPost(Session* session)
 		{
 			if (errorCode != WSAECONNRESET)
 			{
-				// std::cout << "WSARecv() Error : " << errorCode << std::endl;
+				std::cout << "WSARecv() Error : " << errorCode << std::endl;
 			}
-			if (InterlockedDecrement16(&session->CurrentAsyncIOCount) == 0)
+			if (InterlockedDecrement16(&session->Verifier.CurrentAsyncIOCount) == 0)
 			{
 				releaseSession(session);
 			}
@@ -480,16 +477,15 @@ void LanServer::recvPost(Session* session)
 
 void LanServer::releaseSession(Session* session)
 {
+	ReleaseVerifier* verifier = &session->Verifier;
+
+	// 고민...
 	sessionID_t id = session->ID;
 
-	AcquireSRWLockExclusive(&session->Lock);
-	{
-		session->ID = INVALID_SESSION_ID;
-		closesocket(session->Socket);
-	}
-	ReleaseSRWLockExclusive(&session->Lock);
+	session->ID = INVALID_SESSION_ID;
+	closesocket(session->Socket);
 
-	session->SendBuffer.Clear();
+	session->SendQueue.Clear();
 	session->ReceiveBuffer.Clear();
 
 	mUseableIndexesStack->Push(EXTRACT_INDEX_FROM_ID(id));
@@ -497,4 +493,36 @@ void LanServer::releaseSession(Session* session)
 	InterlockedDecrement(&mCurrentSessionCount);
 
 	mListener->OnClientLeave(id);
+}
+
+LanServer::Session* LanServer::acquireSessionOrNull(sessionID_t ID)
+{
+	uint64_t index = EXTRACT_INDEX_FROM_ID(ID);
+
+	if (mMaximumSessionCount <= index)
+	{
+		return nullptr;
+	}
+	Session* session = &mSessions[index];
+
+	InterlockedIncrement16(&session->Verifier.CurrentAsyncIOCount);
+
+	if (session->Verifier.ReleaseFlag == true)
+	{
+		if (InterlockedDecrement16(&session->Verifier.CurrentAsyncIOCount) == 0)
+		{
+			releaseSession(session);
+		}
+		return nullptr;
+	}
+
+	if (session->ID != ID)
+	{
+		if (InterlockedDecrement16(&session->Verifier.CurrentAsyncIOCount) == 0)
+		{
+			releaseSession(session);
+		}
+		return nullptr;
+	}
+	return session;
 }

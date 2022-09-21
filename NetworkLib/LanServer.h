@@ -8,11 +8,28 @@ class LanServer final
 {
 public:
 	enum { MAX_ASYNC_SENDS = 128 };
+
 	struct OverlappedExtension
 	{
 		OVERLAPPED Overlapped;
 		EIOType Type;
 	};
+
+	union ReleaseVerifier
+	{
+		struct
+		{
+			INT16 ReleaseFlag;
+			INT16 CurrentAsyncIOCount;
+		};
+		INT32 Verifier;
+
+		ReleaseVerifier()
+			: Verifier(0)
+		{
+		}
+	};
+	static_assert(sizeof(ReleaseVerifier) == 4, "Invalid size");
 
 	struct Session
 	{
@@ -20,11 +37,10 @@ public:
 		SOCKET Socket;
 		SOCKADDR_IN Addr;
 		bool bIsSending;
-		INT16 CurrentAsyncIOCount;
-
+		ReleaseVerifier Verifier;
 		RingBuffer ReceiveBuffer;
 
-		INT16 NumSend;
+		INT16 NumSent;
 		LockFreeQueue<IntrusivePointer<Message>*> SendQueue;
 		IntrusivePointer<Message>* SentMessages[MAX_ASYNC_SENDS];
 
@@ -32,8 +48,7 @@ public:
 		OverlappedExtension SendOverlapped;
 
 		Session()
-			:CurrentAsyncIOCount(0),
-			SendQueue(MAX_ASYNC_SENDS)
+			: SendQueue(MAX_ASYNC_SENDS)
 		{
 			RecvOverlapped.Type = EIOType::Recv;
 			SendOverlapped.Type = EIOType::Send;
@@ -69,6 +84,7 @@ private:
 	void sendPost(Session* session);
 	void recvPost(Session* session);
 	void releaseSession(Session* session);
+	Session* acquireSessionOrNull(sessionID_t ID);
 
 private:
 	enum
@@ -84,6 +100,8 @@ private:
 	Session* mSessions;
 
 	LockFreeStack<uint64_t>* mUseableIndexesStack;
+
+	ObjectPool<IntrusivePointer<Message>>* mMessagePool;
 
 	unsigned long mIP;
 	unsigned short mPort;

@@ -48,6 +48,15 @@
     <ClInclude Include="LockFreeStack.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
+    <ClInclude Include="Chunk.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="TLSObjectPoolMiddleware.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="TLSObjectPool.h">
+      <Filter>헤더 파일</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="LanServer.cpp">

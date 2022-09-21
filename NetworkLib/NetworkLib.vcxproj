@@ -20,6 +20,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CCrashDump.h" />
+    <ClInclude Include="Chunk.h" />
     <ClInclude Include="EIOType.h" />
     <ClInclude Include="INetworkEventListener.h" />
     <ClInclude Include="IntrusivePointer.h" />
@@ -30,6 +31,8 @@
     <ClInclude Include="LockFreeQueue.h" />
     <ClInclude Include="RingBuffer.h" />
     <ClInclude Include="LockFreeStack.h" />
+    <ClInclude Include="TLSObjectPool.h" />
+    <ClInclude Include="TLSObjectPoolMiddleware.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="CCrashDump.cpp" />

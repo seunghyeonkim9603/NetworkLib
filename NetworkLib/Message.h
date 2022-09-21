@@ -16,9 +16,8 @@ public:
 	Message(Message&& other) noexcept;
 	~Message();
 
-	inline void	Reserve(int capacity);
-	inline void	Release();
-	inline void	Clear();
+	inline void     Reserve(int capacity);
+	inline void     Clear();
 	inline int		GetCapacity() const;
     inline int		GetSize() const;
     inline char*	GetFront() const;
@@ -84,12 +83,6 @@ inline void Message::Reserve(int capacity)
     *this = std::move(temp);
 }
 
-inline void Message::Release()
-{
-    delete mBuffer;
-    mBuffer = nullptr;
-}
-
 inline void Message::Clear()
 {
     mFront = mBuffer + sizeof(Header);
@@ -117,7 +110,7 @@ inline char* Message::CreateMessage(unsigned int* outLength) const
     {
         header->Length = GetSize();
     }
-    *outLength = header->Length + sizeof(header);
+    *outLength = header->Length + sizeof(*header);
 
     return reinterpret_cast<char*>(header);
 }

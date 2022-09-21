@@ -8,21 +8,24 @@
 #include <memory>
 
 #include "EIOType.h"
-
+#include "CCrashDump.h"
 #include "Message.h"
 #include "IntrusivePointer.h"
 #include "RingBuffer.h"
 #include "ObjectPool.h"
-#include "Stack.h"
+#include "LockFreeStack.h"
+#include "LockFreeQueue.h"
+#include "IntrusivePointer.h"
 #include "LanServer.h"
 #include "INetworkEventListener.h"
-#include "PacketDefine.h"
 #include "Listener.h"
 
 #define SERVER_PORT (6000)
 
 int main(void)
 {
+	CCrashDump::Init();
+
 	LanServer server;
 	Listener listener(&server);
 	
@@ -30,14 +33,11 @@ int main(void)
 	LARGE_INTEGER before;
 	LARGE_INTEGER cur;
 
-
 	QueryPerformanceFrequency(&frep);
 
 	server.TryRun(INADDR_ANY, SERVER_PORT, 16, 4, 3000, true, &listener);
 
 	QueryPerformanceCounter(&before);
-	QueryPerformanceCounter(&cur);
-
 
 	while (true)
 	{

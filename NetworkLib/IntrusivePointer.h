@@ -4,6 +4,7 @@ template<typename T>
 class IntrusivePointer final
 {
 public:
+	IntrusivePointer();
 	IntrusivePointer(T* ptr);
 	IntrusivePointer(IntrusivePointer<T>& other);
 	~IntrusivePointer();
@@ -19,6 +20,13 @@ private:
 	T*				mPtr;
 	unsigned int*	mRefCount;
 };
+
+template<typename T>
+inline IntrusivePointer<T>::IntrusivePointer()
+	:	mPtr(nullptr),
+		mRefCount(nullptr)
+{
+}
 
 template<typename T>
 inline IntrusivePointer<T>::IntrusivePointer(T* ptr)
@@ -56,6 +64,8 @@ inline IntrusivePointer<T>& IntrusivePointer<T>::operator=(IntrusivePointer<T>& 
 {
 	mPtr = other.mPtr;
 	mRefCount = other.mRefCount;
+
+	return *this;
 }
 
 template<typename T>

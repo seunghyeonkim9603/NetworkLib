@@ -11,10 +11,11 @@
 #include "Message.h"
 #include "RingBuffer.h"
 #include "ObjectPool.h"
-#include "Stack.h"
+#include "LockFreeStack.h"
+#include "LockFreeQueue.h"
+#include "IntrusivePointer.h"
 #include "LanServer.h"
 #include "INetworkEventListener.h"
-#include "PacketDefine.h"
 #include "Listener.h"
 
 Listener::Listener(LanServer* server)
@@ -38,11 +39,12 @@ void Listener::OnClientLeave(const sessionID_t ID)
 
 void Listener::OnRecv(const sessionID_t ID, const Message* message)
 {
-	Message sendMessage;
+	IntrusivePointer<Message> sendMessage(new Message());
 
-	sendMessage.Write(message->GetBuffer(), message->GetSize());
+	sendMessage->Write(message->GetFront(), message->GetSize());
 
-	mServer->TrySendMessage(ID, sendMessage);
+	mServer->TrySendMessage(ID, &sendMessage);
+	sendMessage.Release();
 }
 
 void Listener::OnError(const int errorCode, const wchar_t* message)

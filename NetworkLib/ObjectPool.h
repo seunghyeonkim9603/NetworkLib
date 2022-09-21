@@ -18,6 +18,7 @@ public:
 	};
 
 public:
+	ObjectPool();
 	ObjectPool(unsigned int size);
 	ObjectPool(ObjectPool& other) = delete;
 	ObjectPool(ObjectPool&& other) = delete;
@@ -36,6 +37,12 @@ private:
 	unsigned int	mActiveCount;
 };
 
+
+template<typename T>
+inline ObjectPool<T>::ObjectPool()
+	:	ObjectPool(0)
+{
+}
 
 template<typename T>
 inline ObjectPool<T>::ObjectPool(unsigned int size)
@@ -76,6 +83,13 @@ inline T* ObjectPool<T>::GetObject()
 	while (true)
 	{
 		oldTop = mTop;
+
+		if (REMOVE_OP_COUNT_FROM(oldTop) == nullptr)
+		{
+			InterlockedIncrement(&mAllCount);
+			InterlockedIncrement(&mActiveCount);
+			return new Node();
+		}
 		newTop = MAKE_TOP(REMOVE_OP_COUNT_FROM(oldTop)->Next, EXTRACT_OP_COUNT_FROM(oldTop) + 1);
 
 		if (InterlockedCompareExchangePointer((PVOID*)&mTop, newTop, oldTop) == oldTop)
