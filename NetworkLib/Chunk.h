@@ -1,32 +1,28 @@
 #pragma once
 
 template<typename T>
-class Chunk : final
+class Chunk final
 {
 public:
 	Chunk();
 	~Chunk();
-
+	void	Fill();
 	T*		Pop();
-	void	Push(const T* value);
+	void	Push(T* value);
 	bool	IsFull() const;
 	bool	IsEmpty() const;
 
 private:
-	enum { CHUNK_SIZE = 256 };
+	enum { CHUNK_SIZE = 512 };
 
-	const T*		mValues[CHUNK_SIZE];
-	unsigned int	mTop;;
+	T*				mValues[CHUNK_SIZE];
+	unsigned int	mTop;
 };
 
 template<typename T>
 inline Chunk<T>::Chunk()
-	:	mTop(CHUNK_SIZE)
+	:	mTop(0)
 {
-	for (unsigned int i = 0; i < CHUNK_SIZE; ++i)
-	{
-		mValues[i] = new T();
-	}
 }
 
 template<typename T>
@@ -39,13 +35,23 @@ inline Chunk<T>::~Chunk()
 }
 
 template<typename T>
+inline void Chunk<T>::Fill()
+{
+	while (mTop < CHUNK_SIZE)
+	{
+		mValues[mTop] = new T();
+		++mTop;
+	}
+}
+
+template<typename T>
 inline T* Chunk<T>::Pop()
 {
 	return mValues[--mTop];
 }
 
 template<typename T>
-inline void Chunk<T>::Push(const T* value)
+inline void Chunk<T>::Push(T* value)
 {
 	mValues[mTop++] = value;
 }

@@ -1,16 +1,8 @@
 #pragma once
 
-#include "ObjectPool.h"
-#include "Chunk.h"
-
 template<typename T>
-class TLSObjectPoolMiddleware : final
+class TLSObjectPoolMiddleware final
 {
-	struct Node
-	{
-		Chunk<T> ObjectChunk;
-		Node* Next;
-	};
 public:
 	TLSObjectPoolMiddleware();
 	~TLSObjectPoolMiddleware();
@@ -21,54 +13,53 @@ public:
 	void		ReleaseObject(T* obj);
 
 private:
-	static ObjectPool<Node> mChunkPool;
-	Node*						mHead;
-	Node*						mTail;
+	static ObjectPool<Chunk<T>> FilledChunkPool;
+	static ObjectPool<Chunk<T>> EmptyChunkPool;
+	Chunk<T>* mChunk;
 };
 
 template<typename T>
+ObjectPool<Chunk<T>> TLSObjectPoolMiddleware<T>::FilledChunkPool;
+
+template<typename T>
+ObjectPool<Chunk<T>> TLSObjectPoolMiddleware<T>::EmptyChunkPool;
+
+template<typename T>
 inline TLSObjectPoolMiddleware<T>::TLSObjectPoolMiddleware()
-	:	mHead(nullptr),
-		mTail(nullptr)
+	:	mChunk(nullptr)
 {
-	mHead = mChunkPool.GetObject();
-	mTail = mHead;
+	mChunk = EmptyChunkPool.GetObject();
+
+	mChunk->Fill();
 }
 
 template<typename T>
 inline TLSObjectPoolMiddleware<T>::~TLSObjectPoolMiddleware()
 {
-	Chunk* cur;
-	Chunk* next;
-
-	cur = mHead;
-	while (cur != nullptr)
-	{
-		next = cur->GetNext();
-		mChunkPool.ReleaseObject(cur);
-		cur = next;
-	}
+	FilledChunkPool.ReleaseObject(mChunk);
 }
 
 template<typename T>
 inline T* TLSObjectPoolMiddleware<T>::GetObject()
 {
-	if (mTop->IsEmpty())
+	if (mChunk->IsEmpty())
 	{
-		Chunk<T>* newTop = mChunkPool.GetObject();
+		EmptyChunkPool.ReleaseObject(mChunk);
+		mChunk = FilledChunkPool.GetObject();
 
-		newTop->SetNext(mTop);
-		mTop = newTop;
+		mChunk->Fill();
 	}
-	return mTop->Pop();
+	return mChunk->Pop();
 }
 
 template<typename T>
 inline void TLSObjectPoolMiddleware<T>::ReleaseObject(T* obj)
 {
-	if (mTop->IsFull())
+	if (mChunk->IsFull())
 	{
-
+		FilledChunkPool.ReleaseObject(mChunk);
+		mChunk = EmptyChunkPool.GetObject();
 	}
+	mChunk->Push(obj);
 }
 

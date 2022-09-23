@@ -1,9 +1,7 @@
 #pragma once
 
-#include "TLSObjectPoolMiddleware.h";
-
 template<typename T>
-class TLSObjectPool : final
+class TLSObjectPool final
 {
 public:
 	TLSObjectPool();
@@ -13,11 +11,13 @@ public:
 
 	T*		GetObject();
 	void	ReleaseObject(T* obj);
+
 private:
 	static thread_local TLSObjectPoolMiddleware<T> Middleware;
 };
 
-
+template<typename T>
+thread_local TLSObjectPoolMiddleware<T> TLSObjectPool<T>::Middleware;
 
 template<typename T>
 inline TLSObjectPool<T>::TLSObjectPool()

@@ -88,7 +88,7 @@ inline T* ObjectPool<T>::GetObject()
 		{
 			InterlockedIncrement(&mAllCount);
 			InterlockedIncrement(&mActiveCount);
-			return new Node();
+			return  reinterpret_cast<T*>(new Node());
 		}
 		newTop = MAKE_TOP(REMOVE_OP_COUNT_FROM(oldTop)->Next, EXTRACT_OP_COUNT_FROM(oldTop) + 1);
 
