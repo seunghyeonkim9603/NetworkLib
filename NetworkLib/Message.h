@@ -3,28 +3,15 @@
 class Message final
 {
 public:
-    struct Header
-    {
-        uint16_t Length;
-    };
-    static_assert(sizeof(Header) == 2, "Invalid Message::Header size");
-
-public:
-	Message();
-	Message(int capacity);
-	Message(const Message& other);
-	Message(Message&& other) noexcept;
-	~Message();
-
 	inline void     Reserve(int capacity);
 	inline void     Clear();
 	inline int		GetCapacity() const;
     inline int		GetSize() const;
+    inline char*    GetBuffer();
     inline char*	GetFront() const;
     inline char*    GetRear() const;
     inline int		MoveWritePos(int offset);
     inline int		MoveReadPos(int offset);
-    inline char*    CreateMessage(unsigned int* outLength) const;
 
 	inline Message& operator=(const Message& other);
 	inline Message& operator=(Message&& other) noexcept;
@@ -59,15 +46,31 @@ public:
 
 	inline Message& Write(const char* str, int size);
 	inline Message& Read(char* outBuffer, int size);
+
+    inline void AddReferenceCount();
+
+    static Message* Create();
+    static void     Release(Message* message);
+
 private:
+    Message();
+    Message(int capacity);
+    Message(const Message& other);
+    Message(Message&& other) noexcept;
+    ~Message();
+
 	inline int getEnquableSize() const;
 
 private:
-	enum { DEFAULT_SIZE = 20000 };
-	int mCapacity;
-	char* mBuffer;
-	char* mFront;
-	char* mRear;
+	enum { DEFAULT_SIZE = 2048 };
+
+    static TLSObjectPool<Message>   MessagePool;
+
+	int             mCapacity;
+	char*           mBuffer;
+	char*           mFront;
+	char*           mRear;
+    unsigned int*   mRefCount;
 };
 
 inline void Message::Reserve(int capacity)
@@ -85,8 +88,8 @@ inline void Message::Reserve(int capacity)
 
 inline void Message::Clear()
 {
-    mFront = mBuffer + sizeof(Header);
-    mRear = mBuffer + sizeof(Header);
+    mFront = mBuffer;
+    mRear = mBuffer; 
 }
 
 inline int Message::GetCapacity() const
@@ -99,20 +102,14 @@ inline int Message::GetSize() const
     return static_cast<int>(mRear - mFront);
 }
 
+inline char* Message::GetBuffer()
+{
+    return mBuffer;
+}
+
 inline char* Message::GetRear() const
 {
     return mRear;
-}
-
-inline char* Message::CreateMessage(unsigned int* outLength) const
-{
-    Header* header = reinterpret_cast<Header*>(mFront - sizeof(Header));
-    {
-        header->Length = GetSize();
-    }
-    *outLength = header->Length + sizeof(*header);
-
-    return reinterpret_cast<char*>(header);
 }
 
 inline char* Message::GetFront() const
@@ -138,8 +135,8 @@ inline Message& Message::operator=(const Message& other)
     {
         delete mBuffer;
     }
-    mBuffer = new char[other.mCapacity + sizeof(Header)];
-    memcpy(mBuffer, other.mBuffer, other.mCapacity + sizeof(Header));
+    mBuffer = new char[other.mCapacity];
+    memcpy(mBuffer, other.mBuffer, other.mCapacity);
     mCapacity = other.mCapacity;
     mFront = mBuffer + (other.mFront - other.mBuffer);
     mRear = mBuffer + (other.mRear - other.mBuffer);
@@ -509,6 +506,29 @@ inline Message& Message::Read(char* outBuffer, int size)
     mFront += size;
 
     return *this;
+}
+
+inline void Message::AddReferenceCount()
+{
+    InterlockedIncrement(mRefCount);
+}
+
+inline Message* Message::Create()
+{
+    Message* message = MessagePool.GetObject();
+
+    *message->mRefCount = 1;
+
+    return message;
+}
+
+inline void Message::Release(Message* message)
+{
+    if (InterlockedDecrement(message->mRefCount) == 0)
+    {
+        message->Clear();
+        MessagePool.ReleaseObject(message);
+    }
 }
 
 inline int Message::getEnquableSize() const

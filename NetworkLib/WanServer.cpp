@@ -3,7 +3,7 @@
 #define MAKE_ID(unique, index) (((unique) << 16) | (index))
 #define EXTRACT_INDEX_FROM_ID(id) ((id) & 0x000000000000FFFF)
 
-LanServer::LanServer()
+WanServer::WanServer()
 	: mListenSocket(INVALID_SOCKET),
 	mhCompletionPort(INVALID_HANDLE_VALUE),
 	mIP(0),
@@ -16,12 +16,12 @@ LanServer::LanServer()
 	WSAStartup(MAKEWORD(2, 2), &data);
 }
 
-LanServer::~LanServer()
+WanServer::~WanServer()
 {
 	WSACleanup();
 }
 
-bool LanServer::TryRun(const unsigned long IP, const unsigned short port
+bool WanServer::TryRun(const unsigned long IP, const unsigned short port
 	, const unsigned int numWorkerThread, const unsigned int numRunningThread
 	, const unsigned int maxSessionCount, const bool bSupportsNagle
 	, INetworkEventListener* listener)
@@ -109,7 +109,7 @@ bool LanServer::TryRun(const unsigned long IP, const unsigned short port
 	return true;
 }
 
-void LanServer::Terminate()
+void WanServer::Terminate()
 {
 	closesocket(mListenSocket);
 
@@ -138,7 +138,7 @@ void LanServer::Terminate()
 	delete mUseableIndexesStack;
 }
 
-bool LanServer::TrySendMessage(const sessionID_t ID, Message* messagePtr)
+bool WanServer::TrySendMessage(const sessionID_t ID, Message* messagePtr)
 {
 	Session* target = acquireSessionOrNull(ID);
 
@@ -162,7 +162,7 @@ bool LanServer::TrySendMessage(const sessionID_t ID, Message* messagePtr)
 	return true;
 }
 
-bool LanServer::TryDisconnect(const sessionID_t ID)
+bool WanServer::TryDisconnect(const sessionID_t ID)
 {
 	Session* target = acquireSessionOrNull(ID);
 
@@ -179,27 +179,27 @@ bool LanServer::TryDisconnect(const sessionID_t ID)
 	return true;
 }
 
-unsigned long LanServer::GetIP() const
+unsigned long WanServer::GetIP() const
 {
 	return mIP;
 }
 
-unsigned short LanServer::GetPort() const
+unsigned short WanServer::GetPort() const
 {
 	return mPort;
 }
 
-unsigned int LanServer::GetMaximumSessionCount() const
+unsigned int WanServer::GetMaximumSessionCount() const
 {
 	return mMaximumSessionCount;
 }
 
-unsigned int LanServer::GetCurrentSessionCount() const
+unsigned int WanServer::GetCurrentSessionCount() const
 {
 	return mCurrentSessionCount;
 }
 
-Message* LanServer::CreateMessage()
+Message* WanServer::CreateMessage()
 {
 	Message* msg = Message::Create();
 
@@ -209,14 +209,14 @@ Message* LanServer::CreateMessage()
 	return msg;
 }
 
-void LanServer::ReleaseMessage(Message* message)
+void WanServer::ReleaseMessage(Message* message)
 {
 	Message::Release(message);
 }
 
-unsigned int __stdcall LanServer::acceptThread(void* param)
+unsigned int __stdcall WanServer::acceptThread(void* param)
 {
-	LanServer* server = (LanServer*)param;
+	WanServer* server = (WanServer*)param;
 
 	SOCKET listenSocket = server->mListenSocket;
 	HANDLE hCompletionPort = server->mhCompletionPort;
@@ -232,6 +232,8 @@ unsigned int __stdcall LanServer::acceptThread(void* param)
 	SOCKET clientSocket;
 	SOCKADDR_IN clientAddr;
 	int addrLen = sizeof(clientAddr);
+
+	std::srand(std::time(nullptr));
 
 	while (true)
 	{
@@ -286,14 +288,16 @@ unsigned int __stdcall LanServer::acceptThread(void* param)
 	return 0;
 }
 
-unsigned int __stdcall LanServer::workerThread(void* param)
+unsigned int __stdcall WanServer::workerThread(void* param)
 {
-	LanServer* server = (LanServer*)param;
+	WanServer* server = (WanServer*)param;
 
 	HANDLE hCompletionPort = server->mhCompletionPort;
 	INetworkEventListener& listener = *server->mListener;
 
 	bool bSucceded;
+
+	std::srand(std::time(nullptr));
 
 	while (true)
 	{
@@ -333,35 +337,45 @@ unsigned int __stdcall LanServer::workerThread(void* param)
 			{
 			case EIOType::Recv:
 			{
+				bool bIsValidSession = true;
+
 				recvBuffer.MoveRear(cbTransferred);
 
-				Message* message = Message::Create();
+				Header header;
+
+				while (!recvBuffer.IsEmpty())
 				{
-					Header header;
-
-					while (!recvBuffer.IsEmpty())
+					if (!recvBuffer.TryPeek((char*)&header, sizeof(header)))
 					{
-						if (!recvBuffer.TryPeek((char*)&header, sizeof(header)))
-						{
-							break;
-						}
-						if (recvBuffer.GetSize() < header.Length + sizeof(header))
-						{
-							break;
-						}
-						recvBuffer.MoveFront(sizeof(header));
-						recvBuffer.TryDequeue(message->GetRear(), header.Length);
-
-						message->MoveWritePos(header.Length);
-
-						listener.OnRecv(session->ID, message);
-
-						message->Clear();
+						break;
 					}
-				}
-				Message::Release(message);
+					if (recvBuffer.GetSize() < header.Length + sizeof(header))
+					{
+						break;
+					}
+					Message* message = Message::Create();
 
-				server->recvPost(session);
+					recvBuffer.MoveFront(sizeof(header));
+					recvBuffer.TryDequeue(message->GetRear(), header.Length);
+
+					message->MoveWritePos(header.Length);
+
+					decode(&header, message->GetFront());
+
+					if (header.Code != PACKET_CODE || header.CheckSum != calculateCheckSum(message->GetFront(), header.Length))
+					{
+						bIsValidSession = false;
+						break;
+					}
+					listener.OnRecv(session->ID, message);
+
+					Message::Release(message);
+				}
+
+				if (bIsValidSession)
+				{
+					server->recvPost(session);
+				}
 			}
 			break;
 			case EIOType::Send:
@@ -395,7 +409,7 @@ unsigned int __stdcall LanServer::workerThread(void* param)
 
 
 
-void LanServer::sendPost(Session* session)
+void WanServer::sendPost(Session* session)
 {
 	int retval;
 	WSABUF buffers[MAX_ASYNC_SENDS];
@@ -409,15 +423,20 @@ void LanServer::sendPost(Session* session)
 		Message* sendMessage;
 		int numSend = 0;
 
-		while (session->SendQueue.TryDequeue(&sendMessage)) // °¹¼ö Ã¼Å© ÇØÁà¾ß ÇÏ³ª
+		while (session->SendQueue.TryDequeue(&sendMessage))
 		{
 			WSABUF* buff = &buffers[numSend];
 			session->SentMessages[numSend] = sendMessage;
 
 			Header* header = reinterpret_cast<Header*>(sendMessage->GetBuffer());
 			{
+				header->Code = PACKET_CODE;
 				header->Length = sendMessage->GetSize();
+				header->RandKey = std::rand();
+				header->CheckSum = calculateCheckSum(sendMessage->GetFront(), header->Length);
 			}
+			encode(header, sendMessage->GetFront());
+
 			buff->buf = reinterpret_cast<char*>(header);
 			buff->len = sizeof(*header) + header->Length;
 
@@ -447,7 +466,7 @@ void LanServer::sendPost(Session* session)
 	}
 }
 
-void LanServer::recvPost(Session* session)
+void WanServer::recvPost(Session* session)
 {
 	int retval;
 	WSABUF buffer;
@@ -481,7 +500,7 @@ void LanServer::recvPost(Session* session)
 	}
 }
 
-void LanServer::releaseSession(Session* session)
+void WanServer::releaseSession(Session* session)
 {
 	ReleaseVerifier* verifier = &session->Verifier;
 
@@ -504,7 +523,7 @@ void LanServer::releaseSession(Session* session)
 	mListener->OnClientLeave(id);
 }
 
-LanServer::Session* LanServer::acquireSessionOrNull(sessionID_t ID)
+WanServer::Session* WanServer::acquireSessionOrNull(sessionID_t ID)
 {
 	uint64_t index = EXTRACT_INDEX_FROM_ID(ID);
 
@@ -534,4 +553,61 @@ LanServer::Session* LanServer::acquireSessionOrNull(sessionID_t ID)
 		return nullptr;
 	}
 	return session;
+}
+
+void WanServer::encode(Header* header, char* data)
+{
+	unsigned char scalar = 0;
+	unsigned char encoded = 0;
+
+	unsigned char randKey = header->RandKey;
+
+	scalar = header->CheckSum ^ (randKey + 1);
+	encoded = scalar ^ (FIXED_KEY + 1);
+
+	header->CheckSum = encoded;
+
+	for (uint16_t i = 0; i < header->Length; ++i)
+	{
+		scalar = data[i] ^ (randKey + scalar + i + 2);
+		encoded = scalar ^ (FIXED_KEY + encoded + i + 2);
+
+		data[i] = encoded;
+	}
+}
+
+void WanServer::decode(Header* header, char* data)
+{
+	unsigned char scalar;
+	unsigned char decodeKey;
+
+	unsigned char randKey = header->RandKey;
+
+	unsigned char decodeScalar = header->CheckSum ^ (randKey + 1);
+
+	header->CheckSum = decodeScalar ^ (FIXED_KEY + 1);
+
+	scalar = header->CheckSum ^ (randKey + 1);
+	decodeKey = scalar ^ (FIXED_KEY + 1);
+
+	for (uint16_t i = 0; i < header->Length; ++i)
+	{
+		decodeScalar = data[i] ^ (randKey + scalar + i + 2);
+
+		data[i] = decodeScalar ^ (FIXED_KEY + decodeKey + i + 2);
+
+		scalar = data[i] ^ (randKey + scalar + i + 2);
+		decodeKey = scalar ^ (FIXED_KEY + decodeKey + i + 2);
+	}
+}
+
+BYTE WanServer::calculateCheckSum(char* data, unsigned int len)
+{
+	BYTE checkSum = 0;
+
+	for (unsigned int i = 0; i < len; ++i)
+	{
+		checkSum += data[i];
+	}
+	return checkSum % 256;
 }

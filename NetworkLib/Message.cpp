@@ -1,6 +1,4 @@
-#include <memory>
-
-#include "Message.h"
+#include "stdafx.h"
 
 Message::Message()
     : Message(DEFAULT_SIZE)
@@ -9,32 +7,37 @@ Message::Message()
 
 Message::Message(int capacity)
     : mCapacity(capacity),
-    mBuffer(new char[capacity + sizeof(Header)]),
-    mFront(mBuffer + sizeof(Header)),
-    mRear(mBuffer + sizeof(Header))
+    mBuffer(new char[capacity]),
+    mFront(mBuffer),
+    mRear(mBuffer),
+    mRefCount(new unsigned int(0))
 {
 }
 
 Message::Message(const Message& other)
     : mCapacity(other.mCapacity),
-    mBuffer(new char[other.mCapacity + sizeof(Header)]),
+    mBuffer(new char[other.mCapacity]),
     mFront(mBuffer + (other.mFront - other.mBuffer)),
-    mRear(mBuffer + (other.mRear - other.mBuffer))
+    mRear(mBuffer + (other.mRear - other.mBuffer)),
+    mRefCount(new unsigned int(*other.mRefCount))
 {
-    memcpy(mBuffer, other.mBuffer, mCapacity + sizeof(Header));
+    memcpy(mBuffer, other.mBuffer, mCapacity);
 }
 
 Message::Message(Message&& other) noexcept
     : mCapacity(other.mCapacity),
     mBuffer(other.mBuffer),
     mFront(other.mFront),
-    mRear(other.mRear)
+    mRear(other.mRear),
+    mRefCount(other.mRefCount)
 {
     other.mBuffer = nullptr;
+    other.mRefCount = nullptr;
 }
 
 Message::~Message()
 {
     delete mBuffer;
+    delete mRefCount;
 }
 

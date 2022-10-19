@@ -1,331 +1,55 @@
-#pragma comment(lib, "ws2_32")
-#define PROFILE
-#include <iostream>
-#include <WinSock2.h>
-#include <Windows.h>
-#include <process.h>
-#include <unordered_set>
-#include <memory>
-
-#include "EIOType.h"
-#include "CCrashDump.h"
-#include "Message.h"
-#include "IntrusivePointer.h"
-#include "RingBuffer.h"
-#include "ObjectPool.h"
-#include "Chunk.h"
-#include "TLSObjectPoolMiddleware.h"
-#include "TLSObjectPool.h"
-#include "LockFreeStack.h"
-#include "LockFreeQueue.h"
-#include "IntrusivePointer.h"
-#include "LanServer.h"
-#include "INetworkEventListener.h"
+#include "stdafx.h"
 #include "Listener.h"
-#include "Profiler.h"
+
 #define SERVER_PORT (6000)
 
-#define NUM_THREADS (4)
-#define NUM_DATA (10000)
-#define TEST_NUM (2500)
-#define DATA_SIZE (1024)
-#define VALID (0xFFDDCCAA)
-struct Data
+unsigned char gFixedKey = 0xa9;
+
+void Encode(char* outEncoded, const unsigned int len, const unsigned char randKey)
 {
-	unsigned int arr[256];
-	Data()
+	unsigned char scalar = 0;
+	unsigned char encoded = 0;
+
+	for (unsigned int i = 0; i < len; ++i)
 	{
-		arr[0] = VALID;
-	}
-};
+		scalar = outEncoded[i] ^ (randKey + scalar + i + 1);
+		encoded = scalar ^ (gFixedKey + encoded + i + 1);
 
-
-TLSObjectPool<Data> gPool;
-
-Data* gPoolArr[NUM_DATA];
-Data* gHeapArr[NUM_DATA];
-
-unsigned int __stdcall Test(void* param)
-{
-	Data* arr[TEST_NUM];
-	while (true)
-	{
-		for (int i = 0; i < TEST_NUM; ++i)
-		{
-			arr[i] = gPool.GetObject();
-			if (arr[i]->arr[0] != VALID)
-			{
-				CCrashDump::Crash();
-			}
-		}
-		Sleep(0);
-		for (int i = 0; i < TEST_NUM; ++i)
-		{
-			InterlockedIncrement(&arr[i]->arr[0]);
-			if (arr[i]->arr[0] != VALID + 1)
-			{
-				CCrashDump::Crash();
-			}
-		}
-		Sleep(0);
-		for (int i = 0; i < TEST_NUM; ++i)
-		{
-			InterlockedDecrement(&arr[i]->arr[0]);
-			if (arr[i]->arr[0] != VALID)
-			{
-				CCrashDump::Crash();
-			}
-		}
-
-		for (int i = 0; i < TEST_NUM; ++i)
-		{
-			gPool.ReleaseObject(arr[i]);
-		}
+		outEncoded[i] = encoded;
 	}
 }
 
-unsigned int __stdcall PoolTest(void* param)
+void Decode(char* outDecoded, const unsigned int len, const unsigned char randKey)
 {
-	Data* poolArr[TEST_NUM];
+	unsigned char scalar = 0;
+	unsigned char encodeKey = 0;
 
-	for (int i = 0; i < 10; ++i)
+	for (unsigned int i = 0; i < len; ++i)
 	{
-		PROFILE_BEGIN(L"TLSAllocMultipleTimes");
-		for (int i = 0; i < TEST_NUM; ++i)
-		{
-			//PROFILE_BEGIN(L"TLSAllocSingleTime");
-			poolArr[i] = gPool.GetObject();
-			//PROFILE_END(L"TLSAllocSingleTime");
-		}
-		PROFILE_END(L"TLSAllocMultipleTimes");
+		unsigned char temp = outDecoded[i] ^ (randKey + scalar + i + 1);
 
-		PROFILE_BEGIN(L"TLSReleaseMultipleTimes");
-		for (int i = 0; i < TEST_NUM; ++i)
-		{
-			//PROFILE_BEGIN(L"TLSReleaseSingleTime");
-			gPool.ReleaseObject(poolArr[i]);
-			//PROFILE_END(L"TLSReleaseSingleTime");
-		}
-		PROFILE_END(L"TLSReleaseMultipleTimes");
-	}
-	return 0;
-}
+		outDecoded[i] = temp ^ (gFixedKey + encodeKey + i + 1);
 
-unsigned int __stdcall HeapTest(void* param)
-{
-	Data* heapArr[TEST_NUM];
-
-	PROFILE_BEGIN(L"NewMultipleTimes1");
-	for (int i = 0; i < TEST_NUM; ++i)
-	{
-		//	PROFILE_BEGIN(L"NewSingleTime");
-		heapArr[i] = new Data();
-		//	PROFILE_END(L"NewSingleTime");
+		scalar = outDecoded[i] ^ (randKey + scalar + i + 1);
+		encodeKey = scalar ^ (gFixedKey + encodeKey + i + 1);
 	}
-	PROFILE_END(L"NewMultipleTimes1");
-
-	PROFILE_BEGIN(L"DeleteMultipleTimes1");
-	for (int i = 0; i < TEST_NUM; ++i)
-	{
-		//PROFILE_BEGIN(L"DeleteSingleTime");
-		delete heapArr[i];
-		//PROFILE_END(L"DeleteSingleTime");
-	}
-	PROFILE_END(L"DeleteMultipleTimes1");
-	PROFILE_BEGIN(L"NewMultipleTimes2");
-	for (int i = 0; i < TEST_NUM; ++i)
-	{
-		//	PROFILE_BEGIN(L"NewSingleTime");
-		heapArr[i] = new Data();
-		//	PROFILE_END(L"NewSingleTime");
-	}
-	PROFILE_END(L"NewMultipleTimes2");
-
-	PROFILE_BEGIN(L"DeleteMultipleTimes3");
-	for (int i = 0; i < TEST_NUM; ++i)
-	{
-		//PROFILE_BEGIN(L"DeleteSingleTime");
-		delete heapArr[i];
-		//PROFILE_END(L"DeleteSingleTime");
-	}
-	PROFILE_END(L"DeleteMultipleTimes3");
-	PROFILE_BEGIN(L"NewMultipleTimes3");
-	for (int i = 0; i < TEST_NUM; ++i)
-	{
-		//	PROFILE_BEGIN(L"NewSingleTime");
-		heapArr[i] = new Data();
-		//	PROFILE_END(L"NewSingleTime");
-	}
-	PROFILE_END(L"NewMultipleTimes3");
-
-	PROFILE_BEGIN(L"DeleteMultipleTimes4");
-	for (int i = 0; i < TEST_NUM; ++i)
-	{
-		//PROFILE_BEGIN(L"DeleteSingleTime");
-		delete heapArr[i];
-		//PROFILE_END(L"DeleteSingleTime");
-	}
-	PROFILE_END(L"DeleteMultipleTimes4");
-
-	PROFILE_BEGIN(L"NewMultipleTimes5");
-	for (int i = 0; i < TEST_NUM; ++i)
-	{
-		//	PROFILE_BEGIN(L"NewSingleTime");
-		heapArr[i] = new Data();
-		//	PROFILE_END(L"NewSingleTime");
-	}
-	PROFILE_END(L"NewMultipleTimes5");
-
-	PROFILE_BEGIN(L"DeleteMultipleTimes5");
-	for (int i = 0; i < TEST_NUM; ++i)
-	{
-		//PROFILE_BEGIN(L"DeleteSingleTime");
-		delete heapArr[i];
-		//PROFILE_END(L"DeleteSingleTime");
-	}
-	PROFILE_END(L"DeleteMultipleTimes5");
-	PROFILE_BEGIN(L"NewMultipleTimes6");
-	for (int i = 0; i < TEST_NUM; ++i)
-	{
-		//	PROFILE_BEGIN(L"NewSingleTime");
-		heapArr[i] = new Data();
-		//	PROFILE_END(L"NewSingleTime");
-	}
-	PROFILE_END(L"NewMultipleTimes6");
-
-	PROFILE_BEGIN(L"DeleteMultipleTimes6");
-	for (int i = 0; i < TEST_NUM; ++i)
-	{
-		//PROFILE_BEGIN(L"DeleteSingleTime");
-		delete heapArr[i];
-		//PROFILE_END(L"DeleteSingleTime");
-	}
-	PROFILE_END(L"DeleteMultipleTimes6");
-	PROFILE_BEGIN(L"NewMultipleTimes7");
-	for (int i = 0; i < TEST_NUM; ++i)
-	{
-		//	PROFILE_BEGIN(L"NewSingleTime");
-		heapArr[i] = new Data();
-		//	PROFILE_END(L"NewSingleTime");
-	}
-	PROFILE_END(L"NewMultipleTimes7");
-
-	PROFILE_BEGIN(L"DeleteMultipleTimes7");
-	for (int i = 0; i < TEST_NUM; ++i)
-	{
-		//PROFILE_BEGIN(L"DeleteSingleTime");
-		delete heapArr[i];
-		//PROFILE_END(L"DeleteSingleTime");
-	}
-	PROFILE_END(L"DeleteMultipleTimes7");
-	PROFILE_BEGIN(L"NewMultipleTimes8");
-	for (int i = 0; i < TEST_NUM; ++i)
-	{
-		//	PROFILE_BEGIN(L"NewSingleTime");
-		heapArr[i] = new Data();
-		//	PROFILE_END(L"NewSingleTime");
-	}
-	PROFILE_END(L"NewMultipleTimes8");
-
-	PROFILE_BEGIN(L"DeleteMultipleTimes8");
-	for (int i = 0; i < TEST_NUM; ++i)
-	{
-		//PROFILE_BEGIN(L"DeleteSingleTime");
-		delete heapArr[i];
-		//PROFILE_END(L"DeleteSingleTime");
-	}
-	PROFILE_END(L"DeleteMultipleTimes8");
-	PROFILE_BEGIN(L"NewMultipleTimes9");
-	for (int i = 0; i < TEST_NUM; ++i)
-	{
-		//	PROFILE_BEGIN(L"NewSingleTime");
-		heapArr[i] = new Data();
-		//	PROFILE_END(L"NewSingleTime");
-	}
-	PROFILE_END(L"NewMultipleTimes9");
-
-	PROFILE_BEGIN(L"DeleteMultipleTimes9");
-	for (int i = 0; i < TEST_NUM; ++i)
-	{
-		//PROFILE_BEGIN(L"DeleteSingleTime");
-		delete heapArr[i];
-		//PROFILE_END(L"DeleteSingleTime");
-	}
-	PROFILE_END(L"DeleteMultipleTimes9");
-	PROFILE_BEGIN(L"NewMultipleTimes10");
-	for (int i = 0; i < TEST_NUM; ++i)
-	{
-		//	PROFILE_BEGIN(L"NewSingleTime");
-		heapArr[i] = new Data();
-		//	PROFILE_END(L"NewSingleTime");
-	}
-	PROFILE_END(L"NewMultipleTimes10");
-
-	PROFILE_BEGIN(L"DeleteMultipleTimes10");
-	for (int i = 0; i < TEST_NUM; ++i)
-	{
-		//PROFILE_BEGIN(L"DeleteSingleTime");
-		delete heapArr[i];
-		//PROFILE_END(L"DeleteSingleTime");
-	}
-	PROFILE_END(L"DeleteMultipleTimes10");
-
-	return 0;
 }
 
 int main(void)
 {
+
+	char data[] = "aaaaaaaaaabbbbbbbbbbcccccccccc1234567890abcdefghijklmn";
+	char* p = data;
+
+	Encode(data, 55, 0x31);
+
+	Decode(data, 55, 0x31);
+
+	p = data;
+
 	//DWORD num = GetTickCount();
 
-	CCrashDump::Init();
-
-	for (int i = 0; i < 10; ++i)
-	{
-		for (int i = 0; i < NUM_DATA; ++i)
-		{
-			//gPoolArr[i] = gPool.GetObject();
-			gHeapArr[i] = new Data();
-		}
-		for (int i = 0; i < NUM_DATA; ++i)
-		{
-			//gPool.ReleaseObject(gPoolArr[i]);
-			delete gHeapArr[i];
-		}
-	}
-
-	DWORD num = GetTickCount();
-	HANDLE hThreads[NUM_THREADS];
-	{
-		// TLS Pool Test
-	/*	for (int i = 0; i < NUM_THREADS; ++i)
-		{
-			hThreads[i] = (HANDLE)_beginthreadex(nullptr, 0, &PoolTest, nullptr, 0, nullptr);
-		}
-
-		WaitForMultipleObjects(NUM_THREADS, hThreads, true, INFINITE);
-
-		for (int i = 0; i < NUM_THREADS; ++i)
-		{
-			CloseHandle(hThreads[i]);
-		}*/
-	}
-	{
-		// Heap Test
-		for (int i = 0; i < NUM_THREADS; ++i)
-		{
-			hThreads[i] = (HANDLE)_beginthreadex(nullptr, 0, &HeapTest, nullptr, 0, nullptr);
-		}
-
-		WaitForMultipleObjects(NUM_THREADS, hThreads, true, INFINITE);
-
-		for (int i = 0; i < NUM_THREADS; ++i)
-		{
-			CloseHandle(hThreads[i]);
-		}
-	}
-	PROFILES_PRINT(L"heap test.txt");
-	printf("%d\n", GetTickCount() - num);
-	return 0;
+	
 	/*CCrashDump::Init();
 
 	LanServer server;

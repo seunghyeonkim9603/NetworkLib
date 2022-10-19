@@ -5,8 +5,7 @@
 #include <Windows.h>
 #include <unordered_map>
 
-#include "Profiler.h"
-#include "ProfilerManager.h"
+#include "stdafx.h"
 
 ProfilerManager::ProfilerManager()
 	: mProfilers(BUCKET_SIZE)

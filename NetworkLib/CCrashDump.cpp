@@ -6,8 +6,7 @@
 #include <crtdbg.h>
 #include <Psapi.h>
 
-#include "CCrashDump.h"
-
+#include "stdafx.h"
 
 long CCrashDump::_DumpCount = 0;
 

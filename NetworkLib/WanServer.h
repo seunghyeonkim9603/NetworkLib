@@ -1,6 +1,6 @@
 #pragma once
 
-class LanServer final
+class WanServer final
 {
 public:
 	enum { MAX_ASYNC_SENDS = 128 };
@@ -9,18 +9,12 @@ public:
 
 	struct Header
 	{
-		uint16_t Length;
-	};
-	static_assert(sizeof(Header) == 2, "Invalid LanHeader size");
-
-	struct WANHeader
-	{
 		uint8_t Code;
 		uint16_t Length;
 		uint8_t RandKey;
 		uint8_t CheckSum;
 	};
-	static_assert(sizeof(WANHeader) == 5, "Invalid WanHeader size");
+	static_assert(sizeof(Header) == 5, "Invalid WanHeader size");
 
 #pragma pack(pop)
 
@@ -71,12 +65,12 @@ public:
 	};
 
 public:
-	LanServer();
-	~LanServer();
-	LanServer(const LanServer& other) = delete;
-	LanServer(LanServer&& other) = delete;
-	LanServer& operator=(const LanServer& other) = delete;
-	LanServer& operator=(LanServer&& other) noexcept = delete;
+	WanServer();
+	~WanServer();
+	WanServer(const WanServer& other) = delete;
+	WanServer(WanServer&& other) = delete;
+	WanServer& operator=(const WanServer& other) = delete;
+	WanServer& operator=(WanServer&& other) noexcept = delete;
 
 	bool TryRun(const unsigned long IP, const unsigned short port
 		, const unsigned int numWorkerThread, const unsigned int numRunningThread
@@ -99,6 +93,11 @@ private:
 	static unsigned int __stdcall acceptThread(void* param);
 	static unsigned int __stdcall workerThread(void* param);
 
+	static void encode(Header* header, char* data);
+	static void decode(Header* header, char* data);
+
+	static BYTE calculateCheckSum(char* data, unsigned int len);
+
 	void sendPost(Session* session);
 	void recvPost(Session* session);
 
@@ -109,6 +108,8 @@ private:
 	enum
 	{
 		INVALID_SESSION_ID = 0xFFFFFFFFFFFFFFFF,
+		PACKET_CODE = 0x77,
+		FIXED_KEY = 0x32
 	};
 
 	SOCKET mListenSocket;

@@ -12,15 +12,6 @@ private:
 		Node* Next;
 	};
 
-	struct Log
-	{
-		DWORD threadId;
-		char op;
-		Node* before;
-		Node* cur;
-		char unused[8];
-	};
-
 public:
 	LockFreeQueue(unsigned int capacity)
 		: mPool(capacity + 1),
@@ -67,12 +58,6 @@ public:
 			{
 				if (InterlockedCompareExchangePointer((PVOID*)&REMOVE_OP_COUNT_FROM(tail)->Next, newNode, next) == next)
 				{
-					Log* log = &mLogs[InterlockedIncrement64(&mIndex) % 100];
-					log->op = 1;
-					log->threadId = GetCurrentThreadId();
-					log->before = tail;
-					log->cur = newNode;
-
 					InterlockedCompareExchangePointer((PVOID*)&mTail, MAKE_TOP(newNode, EXTRACT_OP_COUNT_FROM(tail) + 1), tail);
 					break;
 				}
@@ -111,11 +96,6 @@ public:
 
 				if (InterlockedCompareExchangePointer((PVOID*)&mHead, MAKE_TOP(next, EXTRACT_OP_COUNT_FROM(head) + 1), head) == head)
 				{
-					Log* log = &mLogs[InterlockedIncrement64(&mIndex) % 100];
-					log->op = 2;
-					log->threadId = GetCurrentThreadId();
-					log->before = head;
-					log->cur = next;
 					head = REMOVE_OP_COUNT_FROM(head);
 					mPool.ReleaseObject(head);
 					break;
@@ -160,8 +140,7 @@ public:
 
 private:
 	ObjectPool<Node> mPool;
-	Log mLogs[100];
-	long long mIndex;
+
 	Node* mHead;
 	Node* mTail;
 
