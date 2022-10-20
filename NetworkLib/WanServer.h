@@ -85,6 +85,9 @@ public:
 
 	unsigned int GetMaximumSessionCount() const;
 	unsigned int GetCurrentSessionCount() const;
+	unsigned int GetNumAccept() const;
+	unsigned int GetNumRecv() const;
+	unsigned int GetNumSend() const;
 
 	Message* CreateMessage();
 	void ReleaseMessage(Message* message);
@@ -130,4 +133,8 @@ private:
 	unsigned int mCurrentSessionCount;
 
 	INetworkEventListener* mListener;
+
+	unsigned int mNumAccept;
+	unsigned int mNumRecv;
+	unsigned int mNumSend;
 };

@@ -1,6 +1,6 @@
 #pragma once
 
-enum EPacketType
+enum EPacketType : WORD
 {
 	PACKET_TYPE_CS_CHAT_SERVER = 0,
 	PACKET_TYPE_CS_CHAT_REQ_LOGIN,

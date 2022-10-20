@@ -10,7 +10,10 @@ WanServer::WanServer()
 	mPort(0),
 	mMaximumSessionCount(0),
 	mCurrentSessionCount(0),
-	mListener(nullptr)
+	mListener(nullptr),
+	mNumAccept(0),
+	mNumRecv(0),
+	mNumSend(0)
 {
 	WSADATA data;
 	WSAStartup(MAKEWORD(2, 2), &data);
@@ -199,6 +202,21 @@ unsigned int WanServer::GetCurrentSessionCount() const
 	return mCurrentSessionCount;
 }
 
+unsigned int WanServer::GetNumAccept() const
+{
+	return mNumAccept;
+}
+
+unsigned int WanServer::GetNumRecv() const
+{
+	return mNumRecv;
+}
+
+unsigned int WanServer::GetNumSend() const
+{
+	return mNumSend;
+}
+
 Message* WanServer::CreateMessage()
 {
 	Message* msg = Message::Create();
@@ -238,6 +256,8 @@ unsigned int __stdcall WanServer::acceptThread(void* param)
 	while (true)
 	{
 		clientSocket = accept(listenSocket, (SOCKADDR*)&clientAddr, &addrLen);
+		
+		InterlockedIncrement(&server->mNumAccept);
 
 		if (clientSocket == INVALID_SOCKET)
 		{
@@ -353,6 +373,8 @@ unsigned int __stdcall WanServer::workerThread(void* param)
 					{
 						break;
 					}
+					InterlockedIncrement(&server->mNumRecv);
+
 					Message* message = Message::Create();
 
 					recvBuffer.MoveFront(sizeof(header));
@@ -381,6 +403,8 @@ unsigned int __stdcall WanServer::workerThread(void* param)
 			case EIOType::Send:
 			{
 				int numSent = session->NumSent;
+
+				InterlockedAdd((LONG*)&server->mNumSend, numSent);
 
 				for (int i = 0; i < numSent; ++i)
 				{
