@@ -39,7 +39,6 @@ bool WanServer::TryRun(const unsigned long IP, const unsigned short port
 
 	mSessions = new Session[maxSessionCount];
 	mUseableIndexesStack = new LockFreeStack<uint64_t>(maxSessionCount);
-	mMessagePool = new ObjectPool<IntrusivePointer<Message>>(maxSessionCount * MAX_ASYNC_SENDS);
 
 	// Initialize Listen Socket
 	{
@@ -151,6 +150,18 @@ bool WanServer::TrySendMessage(const sessionID_t ID, Message* messagePtr)
 	}
 	messagePtr->AddReferenceCount();
 
+	Header* header = reinterpret_cast<Header*>(messagePtr->GetBuffer());
+
+	if (messagePtr->trySetEncodeFlag(true))
+	{
+		header->Code = PACKET_CODE;
+		header->Length = messagePtr->GetSize();
+		header->RandKey = std::rand();
+		header->CheckSum = calculateCheckSum(messagePtr->GetFront(), header->Length);
+
+		encode(header, messagePtr->GetFront());
+	}
+
 	if (!target->SendQueue.TryEnqueue(messagePtr))
 	{
 		closesocket(target->Socket);
@@ -223,6 +234,7 @@ Message* WanServer::CreateMessage()
 
 	msg->MoveReadPos(sizeof(Header));
 	msg->MoveWritePos(sizeof(Header));
+	msg->trySetEncodeFlag(false);
 
 	return msg;
 }
@@ -256,7 +268,7 @@ unsigned int __stdcall WanServer::acceptThread(void* param)
 	while (true)
 	{
 		clientSocket = accept(listenSocket, (SOCKADDR*)&clientAddr, &addrLen);
-		
+
 		InterlockedIncrement(&server->mNumAccept);
 
 		if (clientSocket == INVALID_SOCKET)
@@ -347,7 +359,6 @@ unsigned int __stdcall WanServer::workerThread(void* param)
 				std::cout << "Failed GQCS and Overlapped is not null, ErrorCode : " << errorCode << std::endl;
 			}
 		}
-
 		RingBuffer& recvBuffer = session->ReceiveBuffer;
 		Message** sentMessages = session->SentMessages;
 
@@ -357,8 +368,6 @@ unsigned int __stdcall WanServer::workerThread(void* param)
 			{
 			case EIOType::Recv:
 			{
-				bool bIsValidSession = true;
-
 				recvBuffer.MoveRear(cbTransferred);
 
 				Header header;
@@ -386,18 +395,14 @@ unsigned int __stdcall WanServer::workerThread(void* param)
 
 					if (header.Code != PACKET_CODE || header.CheckSum != calculateCheckSum(message->GetFront(), header.Length))
 					{
-						bIsValidSession = false;
+						goto RELEASE_SESSION;
 						break;
 					}
 					listener.OnRecv(session->ID, message);
 
 					Message::Release(message);
 				}
-
-				if (bIsValidSession)
-				{
-					server->recvPost(session);
-				}
+				server->recvPost(session);
 			}
 			break;
 			case EIOType::Send:
@@ -421,6 +426,8 @@ unsigned int __stdcall WanServer::workerThread(void* param)
 				break;
 			}
 		}
+
+	RELEASE_SESSION:
 		if (InterlockedDecrement16(&session->Verifier.CurrentAsyncIOCount) == 0)
 		{
 			server->releaseSession(session);
@@ -430,8 +437,6 @@ unsigned int __stdcall WanServer::workerThread(void* param)
 
 	return 0;
 }
-
-
 
 void WanServer::sendPost(Session* session)
 {
@@ -453,13 +458,6 @@ void WanServer::sendPost(Session* session)
 			session->SentMessages[numSend] = sendMessage;
 
 			Header* header = reinterpret_cast<Header*>(sendMessage->GetBuffer());
-			{
-				header->Code = PACKET_CODE;
-				header->Length = sendMessage->GetSize();
-				header->RandKey = std::rand();
-				header->CheckSum = calculateCheckSum(sendMessage->GetFront(), header->Length);
-			}
-			encode(header, sendMessage->GetFront());
 
 			buff->buf = reinterpret_cast<char*>(header);
 			buff->len = sizeof(*header) + header->Length;
@@ -528,7 +526,7 @@ void WanServer::releaseSession(Session* session)
 {
 	ReleaseVerifier* verifier = &session->Verifier;
 
-	if (InterlockedCompareExchange(reinterpret_cast<unsigned long long*>(&verifier->Verifier), 1, 0) != 0)
+	if (InterlockedCompareExchange((long*)&verifier->Verifier, 1, 0) != 0)
 	{
 		return;
 	}
@@ -559,7 +557,7 @@ WanServer::Session* WanServer::acquireSessionOrNull(sessionID_t ID)
 
 	InterlockedIncrement16(&session->Verifier.CurrentAsyncIOCount);
 
-	if (session->Verifier.ReleaseFlag == true)
+	if (session->Verifier.ReleaseFlag)
 	{
 		if (InterlockedDecrement16(&session->Verifier.CurrentAsyncIOCount) == 0)
 		{
@@ -602,26 +600,24 @@ void WanServer::encode(Header* header, char* data)
 
 void WanServer::decode(Header* header, char* data)
 {
-	unsigned char scalar;
-	unsigned char decodeKey;
+	unsigned char p1;
+	unsigned char e1;
+	unsigned char p2;
+	unsigned char e2;
 
-	unsigned char randKey = header->RandKey;
+	e1 = header->CheckSum;
 
-	unsigned char decodeScalar = header->CheckSum ^ (randKey + 1);
-
-	header->CheckSum = decodeScalar ^ (FIXED_KEY + 1);
-
-	scalar = header->CheckSum ^ (randKey + 1);
-	decodeKey = scalar ^ (FIXED_KEY + 1);
+	p1 = e1 ^ (FIXED_KEY + 1);
+	header->CheckSum = p1 ^ (header->RandKey + 1);
 
 	for (uint16_t i = 0; i < header->Length; ++i)
 	{
-		decodeScalar = data[i] ^ (randKey + scalar + i + 2);
+		e2 = data[i];
+		p2 = e2 ^ (e1 + FIXED_KEY + i + 2);
+		data[i] = p2 ^ (p1 + header->RandKey + i + 2);
 
-		data[i] = decodeScalar ^ (FIXED_KEY + decodeKey + i + 2);
-
-		scalar = data[i] ^ (randKey + scalar + i + 2);
-		decodeKey = scalar ^ (FIXED_KEY + decodeKey + i + 2);
+		e1 = e2;
+		p1 = p2;
 	}
 }
 

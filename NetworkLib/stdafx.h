@@ -4,6 +4,14 @@
 
 #include <iostream>
 #include <WinSock2.h>
+#include <DbgHelp.h>
+#include <crtdbg.h>
+#include <Psapi.h>
+#include <assert.h>
+#include <tchar.h>
+#include <float.h>
+#include <stdio.h>
+#include <string.h>
 #include <Windows.h>
 #include <process.h>
 #include <unordered_set>

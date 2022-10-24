@@ -2,6 +2,9 @@
 
 class Message final
 {
+    friend class Chunk<Message>;
+    friend class WanServer;
+    friend class LanServer;
 public:
 	inline void     Reserve(int capacity);
 	inline void     Clear();
@@ -49,16 +52,17 @@ public:
 
     inline void AddReferenceCount();
 
+private:
     static Message* Create();
     static void     Release(Message* message);
 
-private:
     Message();
     Message(int capacity);
     Message(const Message& other);
     Message(Message&& other) noexcept;
     ~Message();
 
+    inline bool trySetEncodeFlag(bool bEncoded);
 	inline int getEnquableSize() const;
 
 private:
@@ -71,6 +75,7 @@ private:
 	char*           mFront;
 	char*           mRear;
     unsigned int*   mRefCount;
+    bool            mbEncoded;
 };
 
 inline void Message::Reserve(int capacity)
@@ -529,6 +534,11 @@ inline void Message::Release(Message* message)
         message->Clear();
         MessagePool.ReleaseObject(message);
     }
+}
+
+inline bool Message::trySetEncodeFlag(bool bEncoded)
+{
+    return InterlockedExchange8((char*)&mbEncoded, bEncoded) != (char)bEncoded;
 }
 
 inline int Message::getEnquableSize() const

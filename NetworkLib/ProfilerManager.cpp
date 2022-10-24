@@ -1,10 +1,5 @@
 #pragma warning(disable: 4996)
 
-#include <tchar.h>
-#include <stdio.h>
-#include <Windows.h>
-#include <unordered_map>
-
 #include "stdafx.h"
 
 ProfilerManager::ProfilerManager()

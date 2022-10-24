@@ -23,7 +23,6 @@ public:
 		mHead = mPool.GetObject();
 		mTail = mHead;
 		mHead->Next = nullptr;
-		mIndex = 0;
 	}
 
 	~LockFreeQueue()

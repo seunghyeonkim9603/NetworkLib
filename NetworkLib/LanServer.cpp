@@ -36,7 +36,6 @@ bool LanServer::TryRun(const unsigned long IP, const unsigned short port
 
 	mSessions = new Session[maxSessionCount];
 	mUseableIndexesStack = new LockFreeStack<uint64_t>(maxSessionCount);
-	mMessagePool = new ObjectPool<IntrusivePointer<Message>>(maxSessionCount * MAX_ASYNC_SENDS);
 
 	// Initialize Listen Socket
 	{
@@ -516,7 +515,7 @@ LanServer::Session* LanServer::acquireSessionOrNull(sessionID_t ID)
 
 	InterlockedIncrement16(&session->Verifier.CurrentAsyncIOCount);
 
-	if (session->Verifier.ReleaseFlag == true)
+	if (session->Verifier.ReleaseFlag)
 	{
 		if (InterlockedDecrement16(&session->Verifier.CurrentAsyncIOCount) == 0)
 		{

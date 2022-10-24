@@ -1,6 +1,4 @@
-#include <memory>
-
-#include "RingBuffer.h"
+#include "stdafx.h"
 
 RingBuffer::RingBuffer()
 	:RingBuffer(DEFAULT_SIZE)

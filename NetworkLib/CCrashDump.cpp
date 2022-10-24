@@ -1,11 +1,5 @@
 #pragma comment(lib, "DbgHelp.Lib")
 
-#include <iostream>
-#include <Windows.h>
-#include <DbgHelp.h>
-#include <crtdbg.h>
-#include <Psapi.h>
-
 #include "stdafx.h"
 
 long CCrashDump::_DumpCount = 0;

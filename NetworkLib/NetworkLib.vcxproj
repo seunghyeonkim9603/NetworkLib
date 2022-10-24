@@ -30,6 +30,7 @@
     <ClInclude Include="Message.h" />
     <ClInclude Include="ObjectPool.h" />
     <ClInclude Include="LockFreeQueue.h" />
+    <ClInclude Include="ProcessTaskManager.h" />
     <ClInclude Include="Profiler.h" />
     <ClInclude Include="ProfilerManager.h" />
     <ClInclude Include="RingBuffer.h" />
@@ -45,6 +46,7 @@
     <ClCompile Include="LanServer.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="Message.cpp" />
+    <ClCompile Include="ProcessTaskManager.cpp" />
     <ClCompile Include="Profiler.cpp" />
     <ClCompile Include="ProfilerManager.cpp" />
     <ClCompile Include="RingBuffer.cpp" />
@@ -154,6 +156,7 @@
       <Optimization>Disabled</Optimization>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <PrecompiledHeader>Create</PrecompiledHeader>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

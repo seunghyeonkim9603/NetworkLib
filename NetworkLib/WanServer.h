@@ -42,7 +42,7 @@ public:
 
 	struct Session
 	{
-		uint64_t ID;
+		sessionID_t ID;
 		SOCKET Socket;
 		SOCKADDR_IN Addr;
 		bool bIsSending;
@@ -123,8 +123,6 @@ private:
 	Session* mSessions;
 
 	LockFreeStack<uint64_t>* mUseableIndexesStack;
-
-	ObjectPool<IntrusivePointer<Message>>* mMessagePool;
 
 	unsigned long mIP;
 	unsigned short mPort;

@@ -120,8 +120,6 @@ private:
 
 	LockFreeStack<uint64_t>* mUseableIndexesStack;
 
-	ObjectPool<IntrusivePointer<Message>>* mMessagePool;
-
 	unsigned long mIP;
 	unsigned short mPort;
 

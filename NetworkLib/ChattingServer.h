@@ -8,7 +8,6 @@ public:
 	{
 		Join,
 		Leave,
-		Login,
 		PacketReceived
 	};
 
@@ -41,12 +40,22 @@ public:
 
 
 public:
-	ChattingServer();
+	ChattingServer(WanServer* server);
 	~ChattingServer();
 
 	bool TryRun(const unsigned long IP, const unsigned short port
 		, const unsigned int numWorkerThread, const unsigned int numRunningThread
 		, const unsigned int maxSessionCount, const bool bSupportsNagle);
+
+	unsigned int	GetTotalLoginPacketCount() const;
+	unsigned int	GetTotalChattingPacketCount() const;
+	unsigned int	GetTotalSectorMovePacketCount() const;
+	unsigned int	GetTotalUpdateCount() const;
+	unsigned int	GetPlayerCount() const;
+	unsigned int	GetPlayerBeforeLoginCount() const;
+	unsigned int	GetMessagePoolAllocCount() const;
+	unsigned int	GetPlayerPoolAllocCount() const;
+	long			GetMessageQueueSize() const;
 
 
 	virtual void OnError(const int errorCode, const wchar_t* message) override;
@@ -57,7 +66,9 @@ public:
 
 private:
 	static unsigned int __stdcall workerThread(void* param);
-	static unsigned int __stdcall monitorThread(void* param);
+
+	void sendToSector(std::unordered_map<INT64, Player*>& sector, Message& message);
+	void sendToSectorRange(WORD x, WORD y, Message& message);
 
 	void processLoginPacket(sessionID_t id, Message& message);
 	void processMoveSectorPacket(sessionID_t id, Message& message);
@@ -67,29 +78,19 @@ private:
 private:
 	enum
 	{
-		LEFT = 0,
-		LEFT_UP,
-		UP,
-		RIGHT_UP,
-		RIGHT,
-		RIGHT_DOWN,
-		DOWN,
-		LEFT_DOWN,
-		NUM_DIRECTION,
 		SECTOR_COLUMN = 50,
-		SECTOR_ROW = 50
+		SECTOR_ROW = 50,
 	};
 
-	WanServer* mNetServer;
+	WanServer*	mNetServer;
 	HANDLE		mhWorkerThread;
-	HANDLE		mhMonitorThread;
 	HANDLE		mhNetworkEvent;
 
 	ObjectPool<Player>					mPlayerPool;
 	ObjectPool<ContentMessage>			mContentMessagePool;
 	LockFreeQueue<ContentMessage*>		mMessageQueue;
 	std::unordered_map<INT64, Player*>	mPlayers; //unordered_map들 버킷 사이즈 정할 것
-	std::unordered_map<INT64, Player*>	mSectors[SECTOR_ROW][SECTOR_COLUMN];
+	std::unordered_map<INT64, Player*>	mSectors[SECTOR_ROW + 2][SECTOR_COLUMN + 2];
 
 	unsigned int mNumLoginPacket;
 	unsigned int mNumChatPacket;

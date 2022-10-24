@@ -1,5 +1,7 @@
 #include "stdafx.h"
 
+TLSObjectPool<Message> Message::MessagePool;
+
 Message::Message()
     : Message(DEFAULT_SIZE)
 {

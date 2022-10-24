@@ -1,15 +1,6 @@
 #pragma warning(disable: 4996)
 
-#include <assert.h>
-#include <tchar.h>
-#include <float.h>
-#include <stdio.h>
-#include <string.h>
-#include <windows.h>
-#include <unordered_map>
-
-#include "profiler.h"
-#include "ProfilerManager.h"
+#include "stdafx.h"
 
 #define MAX_PROFILER (128)
 #define MIN(num0, num1) ((num0) < (num1) ? (num0) : (num1))
