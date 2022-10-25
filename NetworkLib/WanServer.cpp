@@ -247,15 +247,13 @@ void WanServer::ReleaseMessage(Message* message)
 unsigned int __stdcall WanServer::acceptThread(void* param)
 {
 	WanServer* server = (WanServer*)param;
-
 	SOCKET listenSocket = server->mListenSocket;
 	HANDLE hCompletionPort = server->mhCompletionPort;
+	INetworkEventListener& listener = *server->mListener;
 
 	LockFreeStack<uint64_t>* useableIndexesStack = server->mUseableIndexesStack;
 
 	Session* sessions = server->mSessions;
-
-	INetworkEventListener& listener = *server->mListener;
 
 	uint64_t uniqueID = 0;
 

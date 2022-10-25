@@ -20,6 +20,7 @@ ChattingServer::~ChattingServer()
 	gExit = true;
 
 	WaitForSingleObject(mhWorkerThread, INFINITE);
+	WaitForSingleObject(mhTimeoutThread, INFINITE);
 	CloseHandle(mhWorkerThread);
 	CloseHandle(mhNetworkEvent);
 }
@@ -27,17 +28,15 @@ ChattingServer::~ChattingServer()
 bool ChattingServer::TryRun(const unsigned long IP, const unsigned short port, const unsigned int numWorkerThread, const unsigned int numRunningThread, const unsigned int maxSessionCount, const bool bSupportsNagle)
 {
 	mhWorkerThread = (HANDLE)_beginthreadex(nullptr, 0, &workerThread, this, 0, nullptr);
+	mhTimeoutThread = (HANDLE)_beginthreadex(nullptr, 0, &timeoutEventGenerator, this, 0, nullptr);
 
-	if (mhWorkerThread == INVALID_HANDLE_VALUE)
-	{
-		return false;
-	}
 	if (!mNetServer->TryRun(IP, port, numWorkerThread, numRunningThread, maxSessionCount, bSupportsNagle, this))
 	{
 		gExit = true;
 		SetEvent(mhNetworkEvent);
 
 		WaitForSingleObject(mhWorkerThread, INFINITE);
+		WaitForSingleObject(mhTimeoutThread, INFINITE);
 		CloseHandle(mhWorkerThread);
 		return false;
 	}
@@ -222,11 +221,38 @@ unsigned int __stdcall ChattingServer::workerThread(void* param)
 			}
 			break;
 			default:
-				// Unhandled Packet type
+				server->mNetServer->TryDisconnect(sessionID);
 				break;
 			}
 			server->mNetServer->ReleaseMessage(contentMessage->Payload);
 			server->mContentMessagePool.ReleaseObject(contentMessage);
+		}
+		break;
+		case EContentEvent::Timeout:
+		{
+			LARGE_INTEGER curr;
+
+			QueryPerformanceCounter(&curr);
+
+			for (auto iter : server->mPlayers)
+			{
+				Player* player = iter.second;
+
+				if (player->bLogin)
+				{
+					if (LOGIN_PLAYER_TIMEOUT_MS < curr.QuadPart - player->LastReceivedTime.QuadPart)
+					{
+						server->mNetServer->TryDisconnect(player->SessionID);
+					}
+				}
+				else
+				{
+					if (UNLOGIN_PLAYER_TIMEOUT_MS < curr.QuadPart - player->LastReceivedTime.QuadPart)
+					{
+						server->mNetServer->TryDisconnect(player->SessionID);
+					}
+				}
+			}
 		}
 		break;
 		default:
@@ -235,6 +261,25 @@ unsigned int __stdcall ChattingServer::workerThread(void* param)
 		++server->mNumUpdate;
 	}
 
+	return 0;
+}
+
+unsigned int __stdcall ChattingServer::timeoutEventGenerator(void* param)
+{
+	ChattingServer* server = (ChattingServer*)param;
+
+	while (gExit)
+	{
+		Sleep(TIMEOUT_EVENT_PERIOD_MS);
+
+		ContentMessage* contentMessage = server->mContentMessagePool.GetObject();
+		{
+			contentMessage->Event = EContentEvent::Timeout;
+		}
+		server->mMessageQueue.TryEnqueue(contentMessage);
+
+		SetEvent(server->mhNetworkEvent);
+	}
 	return 0;
 }
 
@@ -353,6 +398,11 @@ void ChattingServer::processChatPacket(sessionID_t id, Message& message)
 	message >> accountNo;
 	message >> messageLength;
 
+	if (MAX_CHAT_LENGTH < messageLength)
+	{
+		mNetServer->TryDisconnect(id);
+		return;
+	}
 	WORD sectorX = player->SectorX;
 	WORD sectorY = player->SectorY;
 

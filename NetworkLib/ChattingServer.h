@@ -8,14 +8,15 @@ public:
 	{
 		Join,
 		Leave,
-		PacketReceived
+		PacketReceived,
+		Timeout
 	};
 
 	struct ContentMessage
 	{
 		sessionID_t		SessionID;
 		EContentEvent	Event;
-		Message* Payload;
+		Message*		Payload;
 	};
 
 	struct Player
@@ -66,6 +67,7 @@ public:
 
 private:
 	static unsigned int __stdcall workerThread(void* param);
+	static unsigned int __stdcall timeoutEventGenerator(void* param);
 
 	void sendToSector(std::unordered_map<INT64, Player*>& sector, Message& message);
 	void sendToSectorRange(WORD x, WORD y, Message& message);
@@ -80,10 +82,18 @@ private:
 	{
 		SECTOR_COLUMN = 50,
 		SECTOR_ROW = 50,
+		/*VALID_LOGIN_PACKET_SIZE = 152,
+		VALID_SECTOR_MOVE_PACKET_SIZE = 12,
+		VALID_HEART_BEAT_PACKET_SIZE = 2,*/
+		MAX_CHAT_LENGTH = 255,
+		LOGIN_PLAYER_TIMEOUT_MS = 40000,
+		UNLOGIN_PLAYER_TIMEOUT_MS = 5000,
+		TIMEOUT_EVENT_PERIOD_MS = 1000
 	};
 
 	WanServer*	mNetServer;
 	HANDLE		mhWorkerThread;
+	HANDLE		mhTimeoutThread;
 	HANDLE		mhNetworkEvent;
 
 	ObjectPool<Player>					mPlayerPool;
