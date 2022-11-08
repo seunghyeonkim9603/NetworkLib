@@ -1,18 +1,22 @@
 #include "stdafx.h"
 
 #include "EPacketType.h"
-#include "ChattingServer.h"
-#include <fstream>
+#include "SingleThreadChattingServer.h"
+
 static bool gExit;
 
-ChattingServer::ChattingServer(WanServer* server)
+SingleThreadChattingServer::SingleThreadChattingServer(WanServer* server)
 	: mNetServer(server),
-	mMessageQueue(256)
+	mMessageQueue(256),
+	mNumChatPacket(0),
+	mNumLoginPacket(0),
+	mNumSectorMovePacket(0),
+	mNumUpdate(0)
 {
 	mhNetworkEvent = CreateEvent(nullptr, false, false, nullptr);
 }
 
-ChattingServer::~ChattingServer()
+SingleThreadChattingServer::~SingleThreadChattingServer()
 {
 	// 플레이어 삭제, 메시지 큐 비우기
 	mNetServer->Terminate();
@@ -25,7 +29,7 @@ ChattingServer::~ChattingServer()
 	CloseHandle(mhNetworkEvent);
 }
 
-bool ChattingServer::TryRun(const unsigned long IP, const unsigned short port, const unsigned int numWorkerThread, const unsigned int numRunningThread, const unsigned int maxSessionCount, const bool bSupportsNagle)
+bool SingleThreadChattingServer::TryRun(const unsigned long IP, const unsigned short port, const unsigned int numWorkerThread, const unsigned int numRunningThread, const unsigned int maxSessionCount, const bool bSupportsNagle)
 {
 	mhWorkerThread = (HANDLE)_beginthreadex(nullptr, 0, &workerThread, this, 0, nullptr);
 	mhTimeoutThread = (HANDLE)_beginthreadex(nullptr, 0, &timeoutEventGenerator, this, 0, nullptr);
@@ -43,51 +47,51 @@ bool ChattingServer::TryRun(const unsigned long IP, const unsigned short port, c
 	return true;
 }
 
-unsigned int ChattingServer::GetTotalLoginPacketCount() const
+unsigned int SingleThreadChattingServer::GetTotalLoginPacketCount() const
 {
 	return mNumLoginPacket;
 }
 
-unsigned int ChattingServer::GetTotalChattingPacketCount() const
+unsigned int SingleThreadChattingServer::GetTotalChattingPacketCount() const
 {
 	return mNumChatPacket;
 }
 
-unsigned int ChattingServer::GetTotalSectorMovePacketCount() const
+unsigned int SingleThreadChattingServer::GetTotalSectorMovePacketCount() const
 {
 	return mNumSectorMovePacket;
 }
 
-unsigned int ChattingServer::GetTotalUpdateCount() const
+unsigned int SingleThreadChattingServer::GetTotalUpdateCount() const
 {
 	return mNumUpdate;
 }
 
-unsigned int ChattingServer::GetPlayerCount() const
+unsigned int SingleThreadChattingServer::GetPlayerCount() const
 {
 	return mPlayers.size();
 }
 
-unsigned int ChattingServer::GetMessagePoolAllocCount() const
+unsigned int SingleThreadChattingServer::GetMessagePoolAllocCount() const
 {
 	return mContentMessagePool.GetAllCount();
 }
 
-unsigned int ChattingServer::GetPlayerPoolAllocCount() const
+unsigned int SingleThreadChattingServer::GetPlayerPoolAllocCount() const
 {
 	return mPlayerPool.GetAllCount();
 }
 
-long ChattingServer::GetMessageQueueSize() const
+long SingleThreadChattingServer::GetMessageQueueSize() const
 {
 	return mMessageQueue.GetSize();
 }
 
-void ChattingServer::OnError(const int errorCode, const wchar_t* message)
+void SingleThreadChattingServer::OnError(const int errorCode, const wchar_t* message)
 {
 }
 
-void ChattingServer::OnRecv(const sessionID_t ID, Message* message)
+void SingleThreadChattingServer::OnRecv(const sessionID_t ID, Message* message)
 {
 	message->AddReferenceCount();
 
@@ -102,12 +106,12 @@ void ChattingServer::OnRecv(const sessionID_t ID, Message* message)
 	SetEvent(mhNetworkEvent);
 }
 
-bool ChattingServer::OnConnectionRequest(const unsigned long IP, const unsigned short port)
+bool SingleThreadChattingServer::OnConnectionRequest(const unsigned long IP, const unsigned short port)
 {
 	return true;
 }
 
-void ChattingServer::OnClientJoin(const sessionID_t ID, const unsigned long IP, const unsigned short port)
+void SingleThreadChattingServer::OnClientJoin(const sessionID_t ID, const unsigned long IP, const unsigned short port)
 {
 	ContentMessage* contentMessage = mContentMessagePool.GetObject();
 	{
@@ -121,7 +125,7 @@ void ChattingServer::OnClientJoin(const sessionID_t ID, const unsigned long IP, 
 	SetEvent(mhNetworkEvent);
 }
 
-void ChattingServer::OnClientLeave(const sessionID_t ID)
+void SingleThreadChattingServer::OnClientLeave(const sessionID_t ID)
 {
 	ContentMessage* contentMessage = mContentMessagePool.GetObject();
 	{
@@ -133,9 +137,9 @@ void ChattingServer::OnClientLeave(const sessionID_t ID)
 	SetEvent(mhNetworkEvent);
 }
 
-unsigned int __stdcall ChattingServer::workerThread(void* param)
+unsigned int __stdcall SingleThreadChattingServer::workerThread(void* param)
 {
-	ChattingServer* server = static_cast<ChattingServer*>(param);
+	SingleThreadChattingServer* server = static_cast<SingleThreadChattingServer*>(param);
 
 	while (!gExit)
 	{
@@ -253,9 +257,9 @@ unsigned int __stdcall ChattingServer::workerThread(void* param)
 	return 0;
 }
 
-unsigned int __stdcall ChattingServer::timeoutEventGenerator(void* param)
+unsigned int __stdcall SingleThreadChattingServer::timeoutEventGenerator(void* param)
 {
-	ChattingServer* server = (ChattingServer*)param;
+	SingleThreadChattingServer* server = (SingleThreadChattingServer*)param;
 
 	while (gExit)
 	{
@@ -272,7 +276,7 @@ unsigned int __stdcall ChattingServer::timeoutEventGenerator(void* param)
 	return 0;
 }
 
-void ChattingServer::removePlayer(Player* player)
+void SingleThreadChattingServer::removePlayer(Player* player)
 {
 	mPlayers.erase(player->SessionID);
 	mLoginAccountNumbers.erase(player->AccountNo);
@@ -282,7 +286,7 @@ void ChattingServer::removePlayer(Player* player)
 }
 
 
-void ChattingServer::sendToSector(std::unordered_map<INT64, Player*>& sector, Message& message)
+void SingleThreadChattingServer::sendToSector(std::unordered_map<INT64, Player*>& sector, Message& message)
 {
 	for (auto iter : sector)
 	{
@@ -290,7 +294,7 @@ void ChattingServer::sendToSector(std::unordered_map<INT64, Player*>& sector, Me
 	}
 }
 
-void ChattingServer::sendToSectorRange(WORD x, WORD y, Message& message)
+void SingleThreadChattingServer::sendToSectorRange(WORD x, WORD y, Message& message)
 {
 	sendToSector(mSectors[y][x], message);
 	sendToSector(mSectors[y][x - 1], message);
@@ -303,7 +307,7 @@ void ChattingServer::sendToSectorRange(WORD x, WORD y, Message& message)
 	sendToSector(mSectors[y + 1][x - 1], message);
 }
 
-void ChattingServer::processLoginPacket(sessionID_t id, Message& message)
+void SingleThreadChattingServer::processLoginPacket(sessionID_t id, Message& message)
 {
 	auto iter = mPlayers.find(id);
 
@@ -339,7 +343,7 @@ void ChattingServer::processLoginPacket(sessionID_t id, Message& message)
 	++mNumLoginPacket;
 }
 
-void ChattingServer::processMoveSectorPacket(sessionID_t id, Message& message)
+void SingleThreadChattingServer::processMoveSectorPacket(sessionID_t id, Message& message)
 {
 	auto iter = mPlayers.find(id);
 
@@ -393,7 +397,7 @@ void ChattingServer::processMoveSectorPacket(sessionID_t id, Message& message)
 	++mNumSectorMovePacket;
 }
 
-void ChattingServer::processChatPacket(sessionID_t id, Message& message)
+void SingleThreadChattingServer::processChatPacket(sessionID_t id, Message& message)
 {
 	auto iter = mPlayers.find(id);
 
@@ -441,7 +445,7 @@ void ChattingServer::processChatPacket(sessionID_t id, Message& message)
 	++mNumChatPacket;
 }
 
-void ChattingServer::processHeartBeatPacket(sessionID_t id, Message& message)
+void SingleThreadChattingServer::processHeartBeatPacket(sessionID_t id, Message& message)
 {
 	auto iter = mPlayers.find(id);
 

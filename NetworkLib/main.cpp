@@ -3,7 +3,7 @@
 
 #include "EPacketType.h"
 #include "ProcessTaskManager.h"
-#include "ChattingServer.h"
+#include "SingleThreadChattingServer.h"
 
 #define SERVER_PORT (12201)
 
@@ -30,7 +30,7 @@ int main(void)
 	unsigned int numTotalSendBefore = 0;
 
 	WanServer wanServer;
-	ChattingServer chatServer(&wanServer);
+	SingleThreadChattingServer chatServer(&wanServer);
 	ProcessTaskManager taskManager;
 	WanServer::Session session;
 

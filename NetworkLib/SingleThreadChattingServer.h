@@ -1,6 +1,6 @@
 #pragma once
 
-class ChattingServer : public INetworkEventListener
+class SingleThreadChattingServer : public INetworkEventListener
 {
 public:
 
@@ -40,8 +40,8 @@ public:
 
 
 public:
-	ChattingServer(WanServer* server);
-	~ChattingServer();
+	SingleThreadChattingServer(WanServer* server);
+	~SingleThreadChattingServer();
 
 	bool TryRun(const unsigned long IP, const unsigned short port
 		, const unsigned int numWorkerThread, const unsigned int numRunningThread

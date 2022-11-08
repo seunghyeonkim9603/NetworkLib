@@ -16,6 +16,12 @@
     <Filter Include="PCH">
       <UniqueIdentifier>{4b0bffa2-9ff6-4916-8d97-e24ce472eb61}</UniqueIdentifier>
     </Filter>
+    <Filter Include="SingleThread">
+      <UniqueIdentifier>{55ed7c83-8896-4453-b6b5-37374aac9b10}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="MultiThread">
+      <UniqueIdentifier>{372305d4-5261-41ec-8d99-6df2f73ad22c}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="EIOType.h">
@@ -69,14 +75,17 @@
     <ClInclude Include="WanServer.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
-    <ClInclude Include="ChattingServer.h">
-      <Filter>헤더 파일</Filter>
-    </ClInclude>
     <ClInclude Include="EPacketType.h">
       <Filter>헤더 파일</Filter>
     </ClInclude>
     <ClInclude Include="ProcessTaskManager.h">
       <Filter>헤더 파일</Filter>
+    </ClInclude>
+    <ClInclude Include="SingleThreadChattingServer.h">
+      <Filter>SingleThread</Filter>
+    </ClInclude>
+    <ClInclude Include="MultiThreadChattingServer.h">
+      <Filter>MultiThread</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -107,11 +116,14 @@
     <ClCompile Include="WanServer.cpp">
       <Filter>소스 파일</Filter>
     </ClCompile>
-    <ClCompile Include="ChattingServer.cpp">
-      <Filter>소스 파일</Filter>
-    </ClCompile>
     <ClCompile Include="ProcessTaskManager.cpp">
       <Filter>소스 파일</Filter>
+    </ClCompile>
+    <ClCompile Include="SingleThreadChattingServer.cpp">
+      <Filter>SingleThread</Filter>
+    </ClCompile>
+    <ClCompile Include="MultiThreadChattingServer.cpp">
+      <Filter>MultiThread</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

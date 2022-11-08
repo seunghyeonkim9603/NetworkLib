@@ -20,7 +20,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CCrashDump.h" />
-    <ClInclude Include="ChattingServer.h" />
+    <ClInclude Include="MultiThreadChattingServer.h" />
+    <ClInclude Include="SingleThreadChattingServer.h" />
     <ClInclude Include="Chunk.h" />
     <ClInclude Include="EIOType.h" />
     <ClInclude Include="EPacketType.h" />
@@ -42,7 +43,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="CCrashDump.cpp" />
-    <ClCompile Include="ChattingServer.cpp" />
+    <ClCompile Include="MultiThreadChattingServer.cpp" />
+    <ClCompile Include="SingleThreadChattingServer.cpp" />
     <ClCompile Include="LanServer.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="Message.cpp" />
