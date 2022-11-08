@@ -12,6 +12,7 @@ public:
 	T*			GetObject();
 	void		ReleaseObject(T* obj);
 
+	static unsigned int GetAllocatedChunkCount();
 private:
 	static ObjectPool<Chunk<T>> FilledChunkPool;
 	static ObjectPool<Chunk<T>> EmptyChunkPool;
@@ -62,4 +63,11 @@ inline void TLSObjectPoolMiddleware<T>::ReleaseObject(T* obj)
 	}
 	mChunk->Push(obj);
 }
+
+template<typename T>
+inline unsigned int TLSObjectPoolMiddleware<T>::GetAllocatedChunkCount()
+{
+	return FilledChunkPool.GetAllCount() + EmptyChunkPool.GetAllCount();
+}
+
 

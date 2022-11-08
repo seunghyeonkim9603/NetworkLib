@@ -2,7 +2,7 @@
 
 #include "EPacketType.h"
 #include "ChattingServer.h"
-
+#include <fstream>
 static bool gExit;
 
 ChattingServer::ChattingServer(WanServer* server)
@@ -66,11 +66,6 @@ unsigned int ChattingServer::GetTotalUpdateCount() const
 unsigned int ChattingServer::GetPlayerCount() const
 {
 	return mPlayers.size();
-}
-
-unsigned int ChattingServer::GetPlayerBeforeLoginCount() const
-{
-	return mNumPlayerBeforeLogin;
 }
 
 unsigned int ChattingServer::GetMessagePoolAllocCount() const
@@ -163,32 +158,23 @@ unsigned int __stdcall ChattingServer::workerThread(void* param)
 				payload >> playerBeforeLogin->Port;
 				playerBeforeLogin->SectorX = 0;
 				playerBeforeLogin->SectorY = 0;
-				playerBeforeLogin->bLogin = false;
 				playerBeforeLogin->SessionID = sessionID;
 				QueryPerformanceCounter(&playerBeforeLogin->LastReceivedTime);
 			}
 			server->mPlayers.insert({ sessionID, playerBeforeLogin });
 
-			++server->mNumPlayerBeforeLogin;
-
-			server->mNetServer->ReleaseMessage(contentMessage->Payload);
 			server->mContentMessagePool.ReleaseObject(contentMessage);
+			server->mNetServer->ReleaseMessage(&payload);
 		}
 		break;
 		case EContentEvent::Leave:
 		{
 			auto iter = server->mPlayers.find(sessionID);
 
-			Player* leftPlayer = iter->second;
-
-			if (!leftPlayer->bLogin)
+			if (iter != server->mPlayers.end())
 			{
-				--server->mNumPlayerBeforeLogin;
+				server->removePlayer(iter->second);
 			}
-			server->mPlayers.erase(sessionID);
-			server->mSectors[leftPlayer->SectorY][leftPlayer->SectorX].erase(sessionID);
-
-			server->mPlayerPool.ReleaseObject(leftPlayer);
 			server->mContentMessagePool.ReleaseObject(contentMessage);
 		}
 		break;
@@ -224,35 +210,38 @@ unsigned int __stdcall ChattingServer::workerThread(void* param)
 				server->mNetServer->TryDisconnect(sessionID);
 				break;
 			}
-			server->mNetServer->ReleaseMessage(contentMessage->Payload);
 			server->mContentMessagePool.ReleaseObject(contentMessage);
+			server->mNetServer->ReleaseMessage(&payload);
 		}
 		break;
 		case EContentEvent::Timeout:
 		{
 			LARGE_INTEGER curr;
+			LARGE_INTEGER freq;
 
 			QueryPerformanceCounter(&curr);
+			QueryPerformanceFrequency(&freq);
 
 			for (auto iter : server->mPlayers)
 			{
 				Player* player = iter.second;
 
-				if (player->bLogin)
+				if (server->mLoginAccountNumbers.find(player->AccountNo) != server->mLoginAccountNumbers.end())
 				{
-					if (LOGIN_PLAYER_TIMEOUT_MS < curr.QuadPart - player->LastReceivedTime.QuadPart)
+					if (LOGIN_PLAYER_TIMEOUT_SEC * freq.QuadPart < curr.QuadPart - player->LastReceivedTime.QuadPart)
 					{
 						server->mNetServer->TryDisconnect(player->SessionID);
 					}
 				}
 				else
 				{
-					if (UNLOGIN_PLAYER_TIMEOUT_MS < curr.QuadPart - player->LastReceivedTime.QuadPart)
+					if (UNLOGIN_PLAYER_TIMEOUT_SEC * freq.QuadPart < curr.QuadPart - player->LastReceivedTime.QuadPart)
 					{
 						server->mNetServer->TryDisconnect(player->SessionID);
 					}
 				}
 			}
+			server->mContentMessagePool.ReleaseObject(contentMessage);
 		}
 		break;
 		default:
@@ -283,6 +272,15 @@ unsigned int __stdcall ChattingServer::timeoutEventGenerator(void* param)
 	return 0;
 }
 
+void ChattingServer::removePlayer(Player* player)
+{
+	mPlayers.erase(player->SessionID);
+	mLoginAccountNumbers.erase(player->AccountNo);
+	mSectors[player->SectorY][player->SectorX].erase(player->SessionID);
+
+	mPlayerPool.ReleaseObject(player);
+}
+
 
 void ChattingServer::sendToSector(std::unordered_map<INT64, Player*>& sector, Message& message)
 {
@@ -309,18 +307,23 @@ void ChattingServer::processLoginPacket(sessionID_t id, Message& message)
 {
 	auto iter = mPlayers.find(id);
 
-	Player* player = iter->second;
-
-	if (player->bLogin)
+	if (iter == mPlayers.end())
 	{
-		mNetServer->TryDisconnect(id);
 		return;
 	}
+	Player* player = iter->second;
+
 	message >> player->AccountNo;
 	message.Read((char*)player->ID, sizeof(player->ID));
 	message.Read((char*)player->Nickname, sizeof(player->Nickname));
 
-	player->bLogin = true;
+	if (mLoginAccountNumbers.find(player->AccountNo) != mLoginAccountNumbers.end())
+	{
+		removePlayer(player);
+		mNetServer->TryDisconnect(id);
+		return;
+	}
+	mLoginAccountNumbers.insert(player->AccountNo);
 
 	Message* sendMessage = mNetServer->CreateMessage();
 	{
@@ -333,7 +336,6 @@ void ChattingServer::processLoginPacket(sessionID_t id, Message& message)
 	mNetServer->ReleaseMessage(sendMessage);
 
 	QueryPerformanceCounter(&player->LastReceivedTime);
-	--mNumPlayerBeforeLogin;
 	++mNumLoginPacket;
 }
 
@@ -341,8 +343,18 @@ void ChattingServer::processMoveSectorPacket(sessionID_t id, Message& message)
 {
 	auto iter = mPlayers.find(id);
 
+	if (iter == mPlayers.end())
+	{
+		return;
+	}
 	Player* player = iter->second;
 
+	if (mLoginAccountNumbers.find(player->AccountNo) == mLoginAccountNumbers.end())
+	{
+		removePlayer(player);
+		mNetServer->TryDisconnect(id);
+		return;
+	}
 	INT64 accountNo;
 	WORD toX;
 	WORD toY;
@@ -351,8 +363,9 @@ void ChattingServer::processMoveSectorPacket(sessionID_t id, Message& message)
 	message >> toX;
 	message >> toY;
 
-	if (!player->bLogin || SECTOR_COLUMN <= toX || SECTOR_ROW <= toY)
+	if (SECTOR_COLUMN <= toX || SECTOR_ROW <= toY || accountNo != player->AccountNo)
 	{
+		removePlayer(player);
 		mNetServer->TryDisconnect(id);
 		return;
 	}
@@ -360,7 +373,6 @@ void ChattingServer::processMoveSectorPacket(sessionID_t id, Message& message)
 	toY += 1;
 	mSectors[player->SectorY][player->SectorX].erase(id);
 
-	player->AccountNo = accountNo;
 	player->SectorX = toX;
 	player->SectorY = toY;
 
@@ -385,10 +397,15 @@ void ChattingServer::processChatPacket(sessionID_t id, Message& message)
 {
 	auto iter = mPlayers.find(id);
 
+	if (iter == mPlayers.end())
+	{
+		return;
+	}
 	Player* player = iter->second;
 
-	if (!player->bLogin)
+	if (mLoginAccountNumbers.find(player->AccountNo) == mLoginAccountNumbers.end())
 	{
+		removePlayer(player);
 		mNetServer->TryDisconnect(id);
 		return;
 	}
@@ -398,8 +415,9 @@ void ChattingServer::processChatPacket(sessionID_t id, Message& message)
 	message >> accountNo;
 	message >> messageLength;
 
-	if (MAX_CHAT_LENGTH < messageLength)
+	if (MAX_CHAT_LENGTH < messageLength || accountNo != player->AccountNo)
 	{
+		removePlayer(player);
 		mNetServer->TryDisconnect(id);
 		return;
 	}
@@ -418,6 +436,7 @@ void ChattingServer::processChatPacket(sessionID_t id, Message& message)
 		sendToSectorRange(sectorX, sectorY, *sendMessage);
 	}
 	mNetServer->ReleaseMessage(sendMessage);
+
 	QueryPerformanceCounter(&player->LastReceivedTime);
 	++mNumChatPacket;
 }
@@ -426,6 +445,10 @@ void ChattingServer::processHeartBeatPacket(sessionID_t id, Message& message)
 {
 	auto iter = mPlayers.find(id);
 
+	if (iter == mPlayers.end())
+	{
+		return;
+	}
 	Player* player = iter->second;
 
 	QueryPerformanceCounter(&player->LastReceivedTime);

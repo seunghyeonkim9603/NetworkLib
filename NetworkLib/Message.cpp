@@ -12,7 +12,8 @@ Message::Message(int capacity)
     mBuffer(new char[capacity]),
     mFront(mBuffer),
     mRear(mBuffer),
-    mRefCount(new unsigned int(0))
+    mRefCount(new unsigned int(0)),
+    mbEncoded(false)
 {
 }
 
@@ -42,4 +43,5 @@ Message::~Message()
     delete mBuffer;
     delete mRefCount;
 }
+
 

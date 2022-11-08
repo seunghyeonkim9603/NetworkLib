@@ -70,7 +70,7 @@ inline T LockFreeStack<T>::Pop()
 {
 	Node* oldTop;
 	Node* newTop;
-	 // 성능 하락지점 있다...
+
 	while (true)
 	{
 		oldTop = mTop;

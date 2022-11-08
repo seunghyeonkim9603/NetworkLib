@@ -34,7 +34,7 @@ public:
 		INT32 Verifier;
 
 		ReleaseVerifier()
-			: Verifier(0)
+			: Verifier(0x00010000)
 		{
 		}
 	};
@@ -91,14 +91,12 @@ public:
 
 	Message* CreateMessage();
 	void ReleaseMessage(Message* message);
-
 private:
 	static unsigned int __stdcall acceptThread(void* param);
 	static unsigned int __stdcall workerThread(void* param);
 
 	static void encode(Header* header, char* data);
 	static void decode(Header* header, char* data);
-
 	static BYTE calculateCheckSum(char* data, unsigned int len);
 
 	void sendPost(Session* session);

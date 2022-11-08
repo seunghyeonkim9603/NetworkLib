@@ -47,8 +47,8 @@ public:
 	inline Message& operator>>(float& val);
 	inline Message& operator>>(double& val);
 
-	inline Message& Write(const char* str, int size);
-	inline Message& Read(char* outBuffer, int size);
+	inline Message& Write(const char* str, unsigned int size);
+	inline Message& Read(char* outBuffer, unsigned int size);
 
     inline void AddReferenceCount();
 
@@ -62,7 +62,8 @@ private:
     Message(Message&& other) noexcept;
     ~Message();
 
-    inline bool trySetEncodeFlag(bool bEncoded);
+    inline bool isEncoded();
+    inline void setEncodeFlag(bool bEncoded);
 	inline int getEnquableSize() const;
 
 private:
@@ -491,7 +492,7 @@ inline Message& Message::operator>>(double& outVal)
     return *this;
 }
 
-inline Message& Message::Write(const char* str, int size)
+inline Message& Message::Write(const char* str, unsigned int size)
 {
     int enquableSize = getEnquableSize();
 
@@ -505,7 +506,7 @@ inline Message& Message::Write(const char* str, int size)
     return *this;
 }
 
-inline Message& Message::Read(char* outBuffer, int size)
+inline Message& Message::Read(char* outBuffer, unsigned int size)
 {
     memcpy(outBuffer, mFront, size);
     mFront += size;
@@ -522,7 +523,7 @@ inline Message* Message::Create()
 {
     Message* message = MessagePool.GetObject();
 
-    *message->mRefCount = 1;
+    *(message->mRefCount) = 1;
 
     return message;
 }
@@ -531,14 +532,21 @@ inline void Message::Release(Message* message)
 {
     if (InterlockedDecrement(message->mRefCount) == 0)
     {
+        message->mbEncoded = false;
         message->Clear();
+
         MessagePool.ReleaseObject(message);
     }
 }
 
-inline bool Message::trySetEncodeFlag(bool bEncoded)
+inline bool Message::isEncoded()
 {
-    return InterlockedExchange8((char*)&mbEncoded, bEncoded) != (char)bEncoded;
+    return mbEncoded;
+}
+
+inline void Message::setEncodeFlag(bool bEncoded)
+{
+    mbEncoded = bEncoded;
 }
 
 inline int Message::getEnquableSize() const

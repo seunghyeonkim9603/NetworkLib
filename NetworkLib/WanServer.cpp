@@ -152,19 +152,24 @@ bool WanServer::TrySendMessage(const sessionID_t ID, Message* messagePtr)
 
 	Header* header = reinterpret_cast<Header*>(messagePtr->GetBuffer());
 
-	if (messagePtr->trySetEncodeFlag(true))
+	if (!messagePtr->isEncoded())
 	{
 		header->Code = PACKET_CODE;
 		header->Length = messagePtr->GetSize();
-		header->RandKey = std::rand();
+		header->RandKey = std::rand() % 256;
 		header->CheckSum = calculateCheckSum(messagePtr->GetFront(), header->Length);
 
 		encode(header, messagePtr->GetFront());
+		messagePtr->setEncodeFlag(true);
 	}
 
 	if (!target->SendQueue.TryEnqueue(messagePtr))
 	{
+		Message::Release(messagePtr);
+
 		closesocket(target->Socket);
+		target->Socket = INVALID_SOCKET;
+
 		return false;
 	}
 	sendPost(target);
@@ -184,7 +189,7 @@ bool WanServer::TryDisconnect(const sessionID_t ID)
 	{
 		return false;
 	}
-	closesocket(target->Socket);
+	CancelIoEx((HANDLE)target->Socket, nullptr);
 
 	if (InterlockedDecrement16(&target->Verifier.CurrentAsyncIOCount) == 0)
 	{
@@ -234,7 +239,6 @@ Message* WanServer::CreateMessage()
 
 	msg->MoveReadPos(sizeof(Header));
 	msg->MoveWritePos(sizeof(Header));
-	msg->trySetEncodeFlag(false);
 
 	return msg;
 }
@@ -243,6 +247,7 @@ void WanServer::ReleaseMessage(Message* message)
 {
 	Message::Release(message);
 }
+
 
 unsigned int __stdcall WanServer::acceptThread(void* param)
 {
@@ -298,8 +303,7 @@ unsigned int __stdcall WanServer::acceptThread(void* param)
 			session->Socket = clientSocket;
 			session->Addr = clientAddr;
 			session->NumSent = 0;
-			session->Verifier.ReleaseFlag = false;
-			InterlockedIncrement16(&session->Verifier.CurrentAsyncIOCount);
+			session->Verifier.ReleaseFlag = 0;
 		}
 		InterlockedIncrement(&server->mCurrentSessionCount);
 
@@ -318,6 +322,7 @@ unsigned int __stdcall WanServer::acceptThread(void* param)
 	return 0;
 }
 
+
 unsigned int __stdcall WanServer::workerThread(void* param)
 {
 	WanServer* server = (WanServer*)param;
@@ -328,7 +333,9 @@ unsigned int __stdcall WanServer::workerThread(void* param)
 	bool bSucceded;
 
 	std::srand(std::time(nullptr));
+	LARGE_INTEGER freq;
 
+	QueryPerformanceFrequency(&freq);
 	while (true)
 	{
 		DWORD cbTransferred = 0;
@@ -337,6 +344,10 @@ unsigned int __stdcall WanServer::workerThread(void* param)
 
 		bSucceded = GetQueuedCompletionStatus(hCompletionPort, &cbTransferred
 			, (PULONG_PTR)&session, (LPOVERLAPPED*)&overlapped, INFINITE);
+
+
+		LARGE_INTEGER completionTime;
+		QueryPerformanceCounter(&completionTime);
 
 		if (bSucceded == true && overlapped == nullptr)
 		{
@@ -352,13 +363,12 @@ unsigned int __stdcall WanServer::workerThread(void* param)
 				break;
 			}
 			else if (errorCode != ERROR_NETNAME_DELETED && errorCode != ERROR_IO_PENDING
-				&& errorCode != WSAECONNRESET && errorCode != 0)
+				&& errorCode != WSAECONNRESET && errorCode != 0 && errorCode != 1236 && errorCode != 10038
+				&& errorCode != ERROR_OPERATION_ABORTED)
 			{
 				std::cout << "Failed GQCS and Overlapped is not null, ErrorCode : " << errorCode << std::endl;
 			}
 		}
-		RingBuffer& recvBuffer = session->ReceiveBuffer;
-		Message** sentMessages = session->SentMessages;
 
 		if (cbTransferred != 0 && overlapped != nullptr)
 		{
@@ -366,6 +376,8 @@ unsigned int __stdcall WanServer::workerThread(void* param)
 			{
 			case EIOType::Recv:
 			{
+				RingBuffer& recvBuffer = session->ReceiveBuffer;
+
 				recvBuffer.MoveRear(cbTransferred);
 
 				Header header;
@@ -376,6 +388,10 @@ unsigned int __stdcall WanServer::workerThread(void* param)
 					{
 						break;
 					}
+					if (header.Code != PACKET_CODE || recvBuffer.GetCapacity() - sizeof(header) < header.Length)
+					{
+						goto RELEASE_SESSION;
+					}
 					if (recvBuffer.GetSize() < header.Length + sizeof(header))
 					{
 						break;
@@ -383,21 +399,22 @@ unsigned int __stdcall WanServer::workerThread(void* param)
 					InterlockedIncrement(&server->mNumRecv);
 
 					Message* message = Message::Create();
-
-					recvBuffer.MoveFront(sizeof(header));
-					recvBuffer.TryDequeue(message->GetRear(), header.Length);
-
-					message->MoveWritePos(header.Length);
-
-					decode(&header, message->GetFront());
-
-					if (header.Code != PACKET_CODE || header.CheckSum != calculateCheckSum(message->GetFront(), header.Length))
 					{
-						goto RELEASE_SESSION;
-						break;
-					}
-					listener.OnRecv(session->ID, message);
+						recvBuffer.MoveFront(sizeof(header));
+						recvBuffer.TryDequeue(message->GetRear(), header.Length);
 
+						message->MoveWritePos(header.Length);
+
+						decode(&header, message->GetFront());
+
+						if (header.CheckSum != calculateCheckSum(message->GetFront(), header.Length))
+						{
+							Message::Release(message);
+
+							goto RELEASE_SESSION;
+						}
+						listener.OnRecv(session->ID, message);
+					}
 					Message::Release(message);
 				}
 				server->recvPost(session);
@@ -405,8 +422,9 @@ unsigned int __stdcall WanServer::workerThread(void* param)
 			break;
 			case EIOType::Send:
 			{
+				Message** sentMessages = session->SentMessages;
 				int numSent = session->NumSent;
-
+				
 				InterlockedAdd((LONG*)&server->mNumSend, numSent);
 
 				for (int i = 0; i < numSent; ++i)
@@ -459,11 +477,9 @@ void WanServer::sendPost(Session* session)
 
 			buff->buf = reinterpret_cast<char*>(header);
 			buff->len = sizeof(*header) + header->Length;
-
 			++numSend;
 		}
 		session->NumSent = numSend;
-
 		retval = WSASend(session->Socket, buffers, numSend, nullptr, 0, &session->SendOverlapped.Overlapped, nullptr);
 
 		if (retval == SOCKET_ERROR)
@@ -530,17 +546,31 @@ void WanServer::releaseSession(Session* session)
 	}
 	sessionID_t id = session->ID;
 
-	session->ID = INVALID_SESSION_ID;
 	closesocket(session->Socket);
 
+	session->ID = INVALID_SESSION_ID;
+	session->Socket = INVALID_SOCKET;
+
+	Message* sendMessage;
+
+	while (session->SendQueue.TryDequeue(&sendMessage))
+	{
+		Message::Release(sendMessage);
+	}
+	for (int i = 0; i < session->NumSent; ++i)
+	{
+		Message::Release(session->SentMessages[i]);
+	}
 	session->SendQueue.Clear();
 	session->ReceiveBuffer.Clear();
+
+	InterlockedIncrement16(&session->Verifier.CurrentAsyncIOCount);
+
+	mListener->OnClientLeave(id);
 
 	mUseableIndexesStack->Push(EXTRACT_INDEX_FROM_ID(id));
 
 	InterlockedDecrement(&mCurrentSessionCount);
-
-	mListener->OnClientLeave(id);
 }
 
 WanServer::Session* WanServer::acquireSessionOrNull(sessionID_t ID)
@@ -572,6 +602,7 @@ WanServer::Session* WanServer::acquireSessionOrNull(sessionID_t ID)
 		}
 		return nullptr;
 	}
+
 	return session;
 }
 
@@ -627,5 +658,5 @@ BYTE WanServer::calculateCheckSum(char* data, unsigned int len)
 	{
 		checkSum += data[i];
 	}
-	return checkSum % 256;
+	return checkSum;
 }

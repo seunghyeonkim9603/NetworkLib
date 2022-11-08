@@ -1,3 +1,4 @@
+
 #include "stdafx.h"
 
 #include "EPacketType.h"
@@ -6,10 +7,12 @@
 
 #define SERVER_PORT (12201)
 
+
+
 int main(void)
 {	
 	CCrashDump::Init();
-
+	
 	LARGE_INTEGER freq;
 	LARGE_INTEGER current;
 	LARGE_INTEGER before;
@@ -29,6 +32,7 @@ int main(void)
 	WanServer wanServer;
 	ChattingServer chatServer(&wanServer);
 	ProcessTaskManager taskManager;
+	WanServer::Session session;
 
 	if (!chatServer.TryRun(INADDR_ANY, SERVER_PORT, 8, 4, 20000, true))
 	{
@@ -50,7 +54,7 @@ int main(void)
 			std::cout << "Message Queue Size : " << chatServer.GetMessageQueueSize() << std::endl;
 			std::cout << "Player Pool Alloc : " << chatServer.GetPlayerPoolAllocCount() << std::endl;
 			std::cout << "Player Count : " << chatServer.GetPlayerCount() << std::endl;
-
+			std::cout << "Allocated Message Cunk Count : " << TLSObjectPoolMiddleware<Message>::GetAllocatedChunkCount() << std::endl;
 			numTotalAccept = wanServer.GetNumAccept();
 			numTotalUpdate = chatServer.GetTotalUpdateCount();
 			numTotalRecv = wanServer.GetNumRecv();

@@ -29,7 +29,6 @@ public:
 
 		unsigned long	IP;
 		unsigned short	Port;
-		bool			bLogin;
 		INT64			AccountNo;
 		WCHAR			ID[MAX_ID_LEN];
 		WCHAR			Nickname[MAX_NICKNAME_LEN];
@@ -53,7 +52,6 @@ public:
 	unsigned int	GetTotalSectorMovePacketCount() const;
 	unsigned int	GetTotalUpdateCount() const;
 	unsigned int	GetPlayerCount() const;
-	unsigned int	GetPlayerBeforeLoginCount() const;
 	unsigned int	GetMessagePoolAllocCount() const;
 	unsigned int	GetPlayerPoolAllocCount() const;
 	long			GetMessageQueueSize() const;
@@ -69,6 +67,8 @@ private:
 	static unsigned int __stdcall workerThread(void* param);
 	static unsigned int __stdcall timeoutEventGenerator(void* param);
 
+	void removePlayer(Player* player);
+
 	void sendToSector(std::unordered_map<INT64, Player*>& sector, Message& message);
 	void sendToSectorRange(WORD x, WORD y, Message& message);
 
@@ -77,18 +77,17 @@ private:
 	void processChatPacket(sessionID_t id, Message& message);
 	void processHeartBeatPacket(sessionID_t id, Message& message);
 
+
 private:
 	enum
 	{
 		SECTOR_COLUMN = 50,
 		SECTOR_ROW = 50,
-		/*VALID_LOGIN_PACKET_SIZE = 152,
-		VALID_SECTOR_MOVE_PACKET_SIZE = 12,
-		VALID_HEART_BEAT_PACKET_SIZE = 2,*/
 		MAX_CHAT_LENGTH = 255,
-		LOGIN_PLAYER_TIMEOUT_MS = 40000,
-		UNLOGIN_PLAYER_TIMEOUT_MS = 5000,
-		TIMEOUT_EVENT_PERIOD_MS = 1000
+		LOGIN_PLAYER_TIMEOUT_SEC = 40,
+		UNLOGIN_PLAYER_TIMEOUT_SEC = 5,
+		TIMEOUT_EVENT_PERIOD_MS = 1000,
+		INVALID_SESSION_ACCOUNT_NO = 0xFFFFFFFFFFFFFFFF
 	};
 
 	WanServer*	mNetServer;
@@ -96,15 +95,15 @@ private:
 	HANDLE		mhTimeoutThread;
 	HANDLE		mhNetworkEvent;
 
-	ObjectPool<Player>					mPlayerPool;
-	ObjectPool<ContentMessage>			mContentMessagePool;
-	LockFreeQueue<ContentMessage*>		mMessageQueue;
-	std::unordered_map<INT64, Player*>	mPlayers; //unordered_map들 버킷 사이즈 정할 것
-	std::unordered_map<INT64, Player*>	mSectors[SECTOR_ROW + 2][SECTOR_COLUMN + 2];
+	ObjectPool<Player>							mPlayerPool;
+	ObjectPool<ContentMessage>					mContentMessagePool;
+	LockFreeQueue<ContentMessage*>				mMessageQueue;
+	std::unordered_map<sessionID_t, Player*>	mPlayers;
+	std::unordered_set<INT64>					mLoginAccountNumbers;
+	std::unordered_map<INT64, Player*>			mSectors[SECTOR_ROW + 2][SECTOR_COLUMN + 2];
 
 	unsigned int mNumLoginPacket;
 	unsigned int mNumChatPacket;
 	unsigned int mNumSectorMovePacket;
 	unsigned int mNumUpdate;
-	unsigned int mNumPlayerBeforeLogin;
 };
